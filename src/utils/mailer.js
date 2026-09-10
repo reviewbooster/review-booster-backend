@@ -113,4 +113,21 @@ const sendFeedbackAlertEmail = async (toEmail, ownerName, businessName, rating, 
   });
 };
 
-module.exports = { sendPasswordResetEmail, sendApprovalEmail, sendRejectionEmail, sendFeedbackAlertEmail };
+const sendSupportReplyEmail = async (toEmail, guestName, replyText) => {
+  const transporter = createTransporter();
+  await transporter.sendMail({
+    from:    '"ReviewBooster Support" <' + process.env.SMTP_USER + '>',
+    to:      toEmail,
+    subject: 'New reply to your ReviewBooster support chat',
+    html:
+      '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">' +
+      '<h2 style="color:#7c3aed">You have a new reply</h2>' +
+      '<p>Hi ' + guestName + ', our team replied to your support chat:</p>' +
+      '<p style="background:#f9fafb;border-radius:8px;padding:12px;color:#374151">' + escapeHtml(replyText) + '</p>' +
+      '<p style="color:#666;font-size:13px">Reopen the Help & Support chat on the ReviewBooster login page to continue the conversation.</p>' +
+      '<p style="color:#888;font-size:13px">Powered by Adcend</p>' +
+      '</div>',
+  });
+};
+
+module.exports = { sendPasswordResetEmail, sendApprovalEmail, sendRejectionEmail, sendFeedbackAlertEmail, sendSupportReplyEmail };

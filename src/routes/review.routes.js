@@ -7,7 +7,7 @@ const roleGuard = require('../middleware/roleGuard');
 const asyncWrap = require('../utils/asyncWrap');
 const { validateQuery } = require('../middleware/validate');
 const { listReviewsSchema } = require('../validation/review.validation');
-const { listReviews, listPrivateFeedback, resolveFeedback, exportReviews, generateReplyForReview } = require('../controllers/review.controller');
+const { listReviews, listPrivateFeedback, resolveFeedback, exportReviews, generateReplyForReview, setFeedbackStage } = require('../controllers/review.controller');
 
 router.use(auth);
 
@@ -17,5 +17,6 @@ router.get('/',               roleGuard('owner', 'staff'), validateQuery(listRev
 
 router.post('/:id/generate-reply', roleGuard('owner'),                                        asyncWrap(generateReplyForReview));
 router.patch('/:id/resolve',       roleGuard('owner'),                                         asyncWrap(resolveFeedback));
+router.patch('/:id/stage',         roleGuard('owner'),                                         asyncWrap(setFeedbackStage));
 
 module.exports = router;

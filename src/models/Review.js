@@ -62,6 +62,18 @@ const ReviewSchema = new Schema(
       default: false,
     },
     /**
+     * Progress tracking for private feedback BEFORE it's resolved.
+     * `resolved` (above) remains the single source of truth for whether a
+     * case is closed — this field is purely for showing where things stand
+     * on the way there, so it's not read by any existing resolved-based
+     * filters/indexes/analytics.
+     */
+    stage: {
+      type: String,
+      enum: ['new', 'processing', 'awaiting_confirmation'],
+      default: 'new',
+    },
+    /**
      * Denormalized name (not a ref) so the resolution trail survives even if
      * the resolving user's account is later deleted.
      */

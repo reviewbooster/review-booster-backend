@@ -6,6 +6,7 @@ const admin     = require('../controllers/admin.controller');
 const billing   = require('../controllers/billing.controller');
 const businessReferral = require('../controllers/businessReferral.controller');
 const auditLog = require('../controllers/auditLog.controller');
+const supportChat = require('../controllers/supportChat.controller');
 const asyncWrap = require('../utils/asyncWrap');
 
 const router = express.Router();
@@ -36,5 +37,11 @@ router.get('/audit-log',                    asyncWrap(auditLog.getAuditLog));
 router.get('/businesses/:id/detail',        asyncWrap(auditLog.getBusinessDetail));
 router.get('/dashboard-stats',              asyncWrap(auditLog.getDashboardStats));
 router.get('/needs-attention',              asyncWrap(auditLog.getNeedsAttention));
+
+// Support Chats — pre-login Help & Support widget, admin side
+router.get('/support-chats',                   asyncWrap(supportChat.listChatsAdmin));
+router.get('/support-chats/:id',                asyncWrap(supportChat.getChatAdmin));
+router.post('/support-chats/:id/messages',      asyncWrap(supportChat.replyChatAdmin));
+router.patch('/support-chats/:id',              asyncWrap(supportChat.setChatStatusAdmin));
 
 module.exports = router;

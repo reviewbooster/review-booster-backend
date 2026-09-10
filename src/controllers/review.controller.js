@@ -9,6 +9,7 @@ const Review = require('../models/Review');
 const Alert  = require('../models/Alert');
 const Business = require('../models/Business');
 const { generateReply } = require('../utils/replyTemplates');
+const { buildBrandedCsv, sendBrandedPdf } = require('../utils/exportBranding');
 const { canUseFeature } = require('../utils/planLimits');
 
 const tenantFilter = (user) => {
@@ -23,7 +24,7 @@ const SORT_OPTIONS = {
   rating_low:  { rating: 1, created_at: -1 },
 };
 
-// GET /api/reviews — public reviews (4-5 star)
+// GET /api/reviews â€” public reviews (4-5 star)
 const listReviews = async (req, res) => {
   const { rating, channel, search, start_date, end_date, sort, page, limit } = req.validatedQuery;
   const filter = { ...tenantFilter(req.user), is_public: true };
@@ -109,7 +110,7 @@ const listPrivateFeedback = async (req, res) => {
   res.json({ data, total, totalUnresolved, page, limit, pages: Math.ceil(total / limit) });
 };
 
-// POST /api/reviews/:id/generate-reply — template-based draft reply
+// POST /api/reviews/:id/generate-reply â€” template-based draft reply
 const generateReplyForReview = async (req, res) => {
   const review = await Review.findOne({ _id: req.params.id, ...tenantFilter(req.user) })
     .populate('customer_id', 'name')
@@ -138,7 +139,7 @@ const generateReplyForReview = async (req, res) => {
 // PATCH /api/reviews/:id/resolve
 const resolveFeedback = async (req, res) => {
   // Optional staff-directory name picked at resolve-time (e.g. on a shared
-  // front-desk device) overrides the logged-in account's own name — lets
+  // front-desk device) overrides the logged-in account's own name â€” lets
   // attribution reflect who actually handled it, not just who's logged in.
   const { resolved_by } = req.body || {};
   const cleanResolvedBy = resolved_by && resolved_by.trim() ? resolved_by.trim() : (req.user.name || null);
@@ -200,15 +201,41 @@ const exportReviews = async (req, res) => {
       r.feedback_text || '',
     ];
   });
-  const csv = [header, ...rows].map(function(row) {
-    return row.map(function(cell) {
-      return '"' + String(cell).replace(/"/g, '""') + '"';
-    }).join(',');
-  }).join('\n');
+  const format = (req.query.format === 'pdf') ? 'pdf' : 'csv';
   var today = new Date().toISOString().slice(0, 10);
+
+  if (format === 'pdf') {
+    return sendBrandedPdf(res, {
+      title: 'Reviews Export',
+      header: header,
+      rows: rows,
+      filename: 'reviews-' + today + '.pdf',
+    });
+  }
+
+  const csv = buildBrandedCsv('Reviews Export', header, rows);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="reviews-' + today + '.csv"');
   res.send(csv);
 };
 
-module.exports = { listReviews, listPrivateFeedback, resolveFeedback, exportReviews, generateReplyForReview };
+// PATCH /api/reviews/:id/stage â€” progress tracking before resolution
+const VALID_STAGES = ['new', 'processing', 'awaiting_confirmation'];
+const setFeedbackStage = async (req, res) => {
+  const { stage } = req.body || {};
+  if (!VALID_STAGES.includes(stage)) {
+    return res.status(400).json({ error: '"stage" must be one of: ' + VALID_STAGES.join(', ') + '.' });
+  }
+
+  const review = await Review.findOneAndUpdate(
+    { _id: req.params.id, ...tenantFilter(req.user), is_public: false },
+    { $set: { stage } },
+    { new: true }
+  ).select('-__v');
+
+  if (!review) return res.status(404).json({ error: 'Feedback not found.' });
+
+  res.json({ data: review });
+};
+
+module.exports = { listReviews, listPrivateFeedback, resolveFeedback, exportReviews, generateReplyForReview, setFeedbackStage };
