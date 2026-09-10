@@ -238,4 +238,21 @@ const setFeedbackStage = async (req, res) => {
   res.json({ data: review });
 };
 
-module.exports = { listReviews, listPrivateFeedback, resolveFeedback, exportReviews, generateReplyForReview, setFeedbackStage };
+// PATCH /api/reviews/:id/notes — internal note, only used when there's no
+// contact info to message the customer directly
+const setFeedbackNotes = async (req, res) => {
+  const { notes } = req.body || {};
+  const cleanNotes = (notes || '').trim().slice(0, 1000) || null;
+
+  const review = await Review.findOneAndUpdate(
+    { _id: req.params.id, ...tenantFilter(req.user), is_public: false },
+    { $set: { internal_notes: cleanNotes } },
+    { new: true }
+  ).select('-__v');
+
+  if (!review) return res.status(404).json({ error: 'Feedback not found.' });
+
+  res.json({ data: review });
+};
+
+module.exports = { listReviews, listPrivateFeedback, resolveFeedback, exportReviews, generateReplyForReview, setFeedbackStage, setFeedbackNotes };

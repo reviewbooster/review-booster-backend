@@ -109,6 +109,17 @@ const BusinessSchema = new Schema(
       sparse:  true,
       default: () => require('crypto').randomBytes(16).toString('hex'),
     },
+    /**
+     * Owner-editable wording for outgoing customer messages. Null means
+     * "use the built-in default text" — lets every business start with a
+     * sensible message without forcing them to configure anything.
+     * Supports {{name}}, {{link}}, {{rating}} placeholders, substituted
+     * at send time.
+     */
+    message_templates: {
+      review_request: { type: String, trim: true, default: null },
+      thank_refer:     { type: String, trim: true, default: null },
+    },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

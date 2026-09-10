@@ -74,6 +74,17 @@ const ReviewSchema = new Schema(
       default: 'new',
     },
     /**
+     * Internal, owner-only note for feedback with no customer contact info
+     * on file (where a direct reply isn't possible). Never shown to or
+     * sent to the customer.
+     */
+    internal_notes: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+      default: null,
+    },
+    /**
      * Denormalized name (not a ref) so the resolution trail survives even if
      * the resolving user's account is later deleted.
      */

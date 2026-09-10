@@ -179,7 +179,7 @@ const getMySettings = async (req, res) => {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
   const business = await Business.findById(req.user.business_id)
-    .select('name type type_other google_review_url whatsapp_consent_required plan trial_ends_at brand_logo_url created_at')
+    .select('name type type_other google_review_url whatsapp_consent_required plan trial_ends_at brand_logo_url created_at message_templates')
     .lean();
   if (!business) {
     return res.status(404).json({ error: 'Business not found.' });
@@ -192,7 +192,7 @@ const updateMySettings = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
-  const { name, type, type_other, google_review_url, whatsapp_consent_required } = req.body;
+  const { name, type, type_other, google_review_url, whatsapp_consent_required, message_templates } = req.body;
 
   const business = await Business.findById(req.user.business_id);
   if (!business) {
@@ -236,6 +236,16 @@ const updateMySettings = async (req, res) => {
     business.whatsapp_consent_required = !!whatsapp_consent_required;
   }
 
+  if (message_templates !== undefined) {
+    var mt = message_templates || {};
+    if (mt.review_request !== undefined) {
+      business.message_templates.review_request = (mt.review_request || '').trim() || null;
+    }
+    if (mt.thank_refer !== undefined) {
+      business.message_templates.thank_refer = (mt.thank_refer || '').trim() || null;
+    }
+  }
+
   await business.save();
 
   res.json({ data: {
@@ -247,6 +257,7 @@ const updateMySettings = async (req, res) => {
     plan: business.plan,
     trial_ends_at: business.trial_ends_at,
     brand_logo_url: business.brand_logo_url,
+    message_templates: business.message_templates,
   } });
 };
 
