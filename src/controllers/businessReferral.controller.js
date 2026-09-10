@@ -58,7 +58,7 @@ const getMyCode = async (req, res) => {
   }
   if (req.user.role !== 'super_admin') {
     const myBusiness = await Business.findById(business_id).select('plan').lean();
-    if (!canUseFeature(myBusiness?.plan, 'engine_b')) {
+    if (!(await canUseFeature(myBusiness?.plan, 'engine_b'))) {
       return res.status(403).json({ error: 'Referring other businesses isn\u2019t available on your current plan. Upgrade to Agency to use this.' });
     }
   }
@@ -74,7 +74,7 @@ const getMyStats = async (req, res) => {
   }
   if (req.user.role !== 'super_admin') {
     const myBusiness = await Business.findById(business_id).select('plan').lean();
-    if (!canUseFeature(myBusiness?.plan, 'engine_b')) {
+    if (!(await canUseFeature(myBusiness?.plan, 'engine_b'))) {
       return res.status(403).json({ error: 'Referring other businesses isn\u2019t available on your current plan. Upgrade to Agency to use this.' });
     }
   }

@@ -11,6 +11,7 @@ const Plan                    = require('../models/Plan');
 const PlatformBillingSettings = require('../models/PlatformBillingSettings');
 const BusinessReferralSettings = require('../models/BusinessReferralSettings');
 const { logAction } = require('./auditLog.controller');
+const { clearPlanLimitsCache } = require('../utils/planLimits');
 
 const PLAN_DEFAULTS = {
   trial:  { name: 'Trial',  sort: 0 },
@@ -145,7 +146,7 @@ const updatePlan = async (req, res) => {
   if (!PLAN_DEFAULTS[slug]) {
     return res.status(400).json({ error: 'Unknown plan.' });
   }
-  const { name, price_monthly, features, is_active } = req.body;
+  const { name, price_monthly, features, is_active, limits } = req.body;
 
   const update = {};
   if (name !== undefined) {
@@ -165,9 +166,22 @@ const updatePlan = async (req, res) => {
   if (is_active !== undefined) {
     update.is_active = !!is_active;
   }
+  if (limits !== undefined && limits !== null) {
+    var toLimit = function(v) {
+      if (v === null || v === '' || v === undefined) return null;
+      var n = Number(v);
+      return (Number.isFinite(n) && n >= 0) ? n : null;
+    };
+    update['limits.customers'] = toLimit(limits.customers);
+    update['limits.staff']     = toLimit(limits.staff);
+    update['limits.ai_reply']  = !!limits.ai_reply;
+    update['limits.engine_a']  = !!limits.engine_a;
+    update['limits.engine_b']  = !!limits.engine_b;
+  }
 
   await getOrCreateAllPlans(); // ensure the doc exists before updating
   const plan = await Plan.findOneAndUpdate({ slug }, { $set: update }, { new: true, upsert: true });
+  clearPlanLimitsCache(); // so this change takes effect immediately, not after the cache TTL
   await logAction(req, { action: 'billing.update_plan', target_type: 'Plan', target_label: slug, metadata: update });
   res.json({ data: plan });
 };

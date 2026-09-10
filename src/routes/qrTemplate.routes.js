@@ -11,11 +11,13 @@ const upload = multer({
   limits:  { fileSize: 2 * 1024 * 1024 },
 });
 
+const roleGuard = require('../middleware/roleGuard');
+
 router.use(auth);
 
 router.get('/',       ctrl.getTemplates);
-router.post('/',      upload.single('image'), ctrl.uploadTemplate);
-router.patch('/:id',  ctrl.updateTemplate);
-router.delete('/:id', ctrl.deleteTemplate);
+router.post('/',      roleGuard('owner'), upload.single('image'), ctrl.uploadTemplate);
+router.patch('/:id',  roleGuard('owner'), ctrl.updateTemplate);
+router.delete('/:id', roleGuard('owner'), ctrl.deleteTemplate);
 
 module.exports = router;

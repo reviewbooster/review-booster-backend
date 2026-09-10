@@ -39,6 +39,20 @@ const PlanSchema = new Schema(
       type: Boolean,
       default: true,
     },
+    /**
+     * Actual feature/limit enforcement for this plan, editable by
+     * super_admin. Null on customers/staff means unlimited. If this whole
+     * object is unset (legacy plan docs created before this existed),
+     * utils/planLimits.js falls back to its hardcoded defaults so nothing
+     * changes in behavior until an admin explicitly edits and saves here.
+     */
+    limits: {
+      customers: { type: Number, default: null, min: 0 },
+      staff:     { type: Number, default: null, min: 0 },
+      ai_reply:  { type: Boolean, default: false },
+      engine_a:  { type: Boolean, default: false },
+      engine_b:  { type: Boolean, default: false },
+    },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

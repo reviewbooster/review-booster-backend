@@ -16,8 +16,8 @@ router.get('/private',       roleGuard('owner', 'staff'), validateQuery(listRevi
 router.get('/',               roleGuard('owner', 'staff'), validateQuery(listReviewsSchema), asyncWrap(listReviews));
 
 router.post('/:id/generate-reply', roleGuard('owner'),                                        asyncWrap(generateReplyForReview));
-router.patch('/:id/resolve',       roleGuard('owner'),                                         asyncWrap(resolveFeedback));
-router.patch('/:id/stage',         roleGuard('owner'),                                         asyncWrap(setFeedbackStage));
-router.patch('/:id/notes',         roleGuard('owner'),                                         asyncWrap(setFeedbackNotes));
+router.patch('/:id/resolve',       roleGuard('owner', 'staff'),                                 asyncWrap(resolveFeedback));
+router.patch('/:id/stage',         roleGuard('owner', 'staff'),                                 asyncWrap(setFeedbackStage));
+router.patch('/:id/notes',         roleGuard('owner', 'staff'),                                 asyncWrap(setFeedbackNotes));
 
 module.exports = router;

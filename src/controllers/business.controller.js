@@ -320,7 +320,7 @@ const createStaff = async (req, res) => {
   }
 
   const myBusiness = await Business.findById(req.user.business_id).select('plan').lean();
-  const limits = getPlanLimits(myBusiness?.plan);
+  const limits = await getPlanLimits(myBusiness?.plan);
   const currentStaffCount = await User.countDocuments({ business_id: req.user.business_id, role: 'staff' });
   if (currentStaffCount >= limits.staff) {
     return res.status(403).json({ error: limits.staff === 0

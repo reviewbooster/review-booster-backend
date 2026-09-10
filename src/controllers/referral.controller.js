@@ -238,7 +238,7 @@ const redeemReferral = async (req, res) => {
 
   if (req.user.role !== 'super_admin') {
     const myBusiness = await Business.findById(business_id).select('plan').lean();
-    if (!canUseFeature(myBusiness?.plan, 'engine_a')) {
+    if (!(await canUseFeature(myBusiness?.plan, 'engine_a'))) {
       return res.status(403).json({ error: 'Customer referrals aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.' });
     }
   }

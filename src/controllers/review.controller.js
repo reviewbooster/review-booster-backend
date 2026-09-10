@@ -120,7 +120,7 @@ const generateReplyForReview = async (req, res) => {
 
   const business = await Business.findById(review.business_id).select('name plan').lean();
 
-  if (req.user.role !== 'super_admin' && !canUseFeature(business?.plan, 'ai_reply')) {
+  if (req.user.role !== 'super_admin' && !(await canUseFeature(business?.plan, 'ai_reply'))) {
     return res.status(403).json({ error: 'AI reply drafts aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.' });
   }
 
