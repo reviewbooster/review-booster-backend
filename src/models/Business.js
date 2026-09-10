@@ -19,9 +19,17 @@ const BusinessSchema = new Schema(
       type: String,
       required: [true, 'Business type is required'],
       enum: {
-        values: ['gym', 'salon', 'clinic', 'restaurant', 'other'],
+        values: ['salon', 'barbershop', 'gym', 'dental', 'clinic', 'restaurant', 'retail', 'auto', 'real_estate', 'education', 'pet_care', 'other'],
         message: '{VALUE} is not a supported business type',
       },
+    },
+    // Only used when type === 'other' — the owner's own typed-in category,
+    // e.g. "Photography Studio". Shown in place of a generic label.
+    type_other: {
+      type: String,
+      trim: true,
+      maxlength: 50,
+      default: null,
     },
     google_review_url: {
       type: String,
@@ -38,6 +46,39 @@ const BusinessSchema = new Schema(
       type: Date,
       required: true,
       default: () => new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days
+    },
+    // Set when an admin manually activates a paid plan (via UPI payment
+    // confirmed outside the app). Null for businesses still on trial or
+    // never activated. The daily cron suspends access once this passes,
+    // same pattern as trial_ends_at.
+    plan_expires_at: {
+      type: Date,
+      default: null,
+    },
+    // Engine B — set once, at signup, if this business came in through
+    // another business's referral link. Points at the referring
+    // Business's own _id (not a code) for easy lookups.
+    referred_by_business_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Business',
+      default: null,
+    },
+    // True once this business's one-time Engine B signup discount has
+    // been shown/used on an activate-plan — prevents it re-applying on
+    // every future renewal.
+    referral_discount_used: {
+      type: Boolean,
+      default: false,
+    },
+    // How this business joined the platform — set once at creation.
+    // 'self_signup' = came through the public /signup form (may also
+    // have referred_by_business_id set, if it came via an Engine B link).
+    // 'admin_created' = a super_admin created the account directly.
+    // null on businesses created before this field existed.
+    source: {
+      type: String,
+      enum: ['self_signup', 'admin_created', null],
+      default: null,
     },
     brand_color: {
       type: String,

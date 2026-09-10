@@ -8,15 +8,24 @@ const { PassThrough } = require('stream');
 const Customer        = require('../models/Customer');
 const ReviewRequest   = require('../models/ReviewRequest');
 const Review          = require('../models/Review');
+const Business        = require('../models/Business');
+const { getPlanLimits } = require('../utils/planLimits');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
   return { business_id: user.business_id };
 };
 
+const SORT_OPTIONS = {
+  newest:    { added_at: -1 },
+  oldest:    { added_at: 1 },
+  name_asc:  { name: 1 },
+  name_desc: { name: -1 },
+};
+
 // GET /api/customers
 const listCustomers = async (req, res) => {
-  const { search, page, limit } = req.validatedQuery;
+  const { search, page, limit, sort } = req.validatedQuery;
   const status = req.query.status;
   const filter = tenantFilter(req.user);
   if (status === 'active')   filter.opted_out = false;
@@ -29,9 +38,10 @@ const listCustomers = async (req, res) => {
     ];
   }
   const skip = (page - 1) * limit;
+  const sortSpec = SORT_OPTIONS[sort] || SORT_OPTIONS.newest;
   const [total, customers] = await Promise.all([
     Customer.countDocuments(filter),
-    Customer.find(filter).sort({ created_at: -1 }).skip(skip).limit(limit).select('-__v'),
+    Customer.find(filter).sort(sortSpec).skip(skip).limit(limit).select('-__v'),
   ]);
   res.json({ data: customers, total, page, limit, pages: Math.ceil(total / limit) });
 };
@@ -40,6 +50,16 @@ const listCustomers = async (req, res) => {
 const createCustomer = async (req, res) => {
   const { name, phone, email, notes } = req.body;
   const filter = tenantFilter(req.user);
+
+  if (req.user.role !== 'super_admin') {
+    const business = await Business.findById(req.user.business_id).select('plan').lean();
+    const limits = getPlanLimits(business?.plan);
+    const currentCount = await Customer.countDocuments(filter);
+    if (currentCount >= limits.customers) {
+      return res.status(403).json({ error: 'You\u2019ve reached your plan\u2019s customer limit (' + limits.customers + '). Upgrade your plan to add more.' });
+    }
+  }
+
   const existing = await Customer.findOne({
     ...filter,
     $or: [

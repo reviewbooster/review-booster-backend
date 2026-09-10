@@ -15,6 +15,7 @@ router.use(auth);
 
 router.get('/',       ctrl.getTemplates);
 router.post('/',      upload.single('image'), ctrl.uploadTemplate);
+router.patch('/:id',  ctrl.updateTemplate);
 router.delete('/:id', ctrl.deleteTemplate);
 
 module.exports = router;

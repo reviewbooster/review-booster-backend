@@ -22,6 +22,7 @@ const listCustomersSchema = Joi.object({
   search: Joi.string().trim().max(100).optional().allow(''),
   page:   Joi.number().integer().min(1).default(1),
   limit:  Joi.number().integer().min(1).max(100).default(20),
+  sort:   Joi.string().valid('newest', 'oldest', 'name_asc', 'name_desc').default('newest'),
 });
 
 module.exports = { createCustomerSchema, updateCustomerSchema, listCustomersSchema };

@@ -3,18 +3,19 @@
 const express   = require('express');
 const router    = express.Router();
 const auth      = require('../middleware/auth');
+const roleGuard = require('../middleware/roleGuard');
 const asyncWrap = require('../utils/asyncWrap');
 const { validateQuery } = require('../middleware/validate');
 const { listReviewsSchema } = require('../validation/review.validation');
-const { listReviews, listPrivateFeedback, resolveFeedback, exportReviews } = require('../controllers/review.controller');
+const { listReviews, listPrivateFeedback, resolveFeedback, exportReviews, generateReplyForReview } = require('../controllers/review.controller');
 
 router.use(auth);
 
-// IMPORTANT: /private must be before /:id — otherwise Express treats
-// the string "private" as an :id param and calls the wrong handler
-router.get('/export',        asyncWrap(exportReviews));
-router.get('/private',       validateQuery(listReviewsSchema), asyncWrap(listPrivateFeedback));
-router.get('/',              validateQuery(listReviewsSchema), asyncWrap(listReviews));
-router.patch('/:id/resolve',                                   asyncWrap(resolveFeedback));
+router.get('/export',        roleGuard('owner', 'staff'), asyncWrap(exportReviews));
+router.get('/private',       roleGuard('owner', 'staff'), validateQuery(listReviewsSchema), asyncWrap(listPrivateFeedback));
+router.get('/',               roleGuard('owner', 'staff'), validateQuery(listReviewsSchema), asyncWrap(listReviews));
+
+router.post('/:id/generate-reply', roleGuard('owner'),                                        asyncWrap(generateReplyForReview));
+router.patch('/:id/resolve',       roleGuard('owner'),                                         asyncWrap(resolveFeedback));
 
 module.exports = router;

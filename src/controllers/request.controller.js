@@ -34,7 +34,7 @@ const channelSenders = {
 
 // POST /api/requests
 const sendRequest = async (req, res) => {
-  const { customer_id, channel } = req.body;
+  const { customer_id, channel, served_by } = req.body;
 
   // Verify customer belongs to this business
   const customer = await Customer.findOne({ _id: customer_id, ...tenantFilter(req.user) });
@@ -52,6 +52,8 @@ const sendRequest = async (req, res) => {
   const token     = nodeCrypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
+  const cleanServedBy = served_by && served_by.trim() ? served_by.trim() : null;
+
   const reviewRequest = await ReviewRequest.create({
     business_id: req.user.business_id,
     customer_id,
@@ -59,6 +61,7 @@ const sendRequest = async (req, res) => {
     channel,
     status: 'sent',
     expires_at: expiresAt,
+    served_by: cleanServedBy,
   });
 
   // Build public review URL for the message

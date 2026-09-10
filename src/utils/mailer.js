@@ -2,6 +2,15 @@
 require('dns').setDefaultResultOrder('ipv4first');
 const nodemailer = require('nodemailer');
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function createTransporter() {
   return nodemailer.createTransport({
     host:              'smtp.gmail.com',
@@ -74,4 +83,34 @@ const sendRejectionEmail = async (toEmail, ownerName, businessName) => {
   });
 };
 
-module.exports = { sendPasswordResetEmail, sendApprovalEmail, sendRejectionEmail };
+const sendFeedbackAlertEmail = async (toEmail, ownerName, businessName, rating, feedbackText) => {
+  const transporter = createTransporter();
+  const dashboardUrl = (process.env.FRONTEND_URL || '') + '/dashboard/feedback';
+  const stars = '\u2605'.repeat(rating) + '\u2606'.repeat(5 - rating);
+  const cleanFeedback = feedbackText ? feedbackText.trim() : '';
+
+  const textBody =
+    'Hi ' + ownerName + ',\n\n' +
+    'You received a new ' + rating + '-star review for ' + businessName + ' that needs your attention.\n\n' +
+    (cleanFeedback ? 'Customer feedback: "' + cleanFeedback + '"\n\n' : '') +
+    'View and reply here: ' + dashboardUrl + '\n\n' +
+    'This is a notification from your ReviewBooster dashboard.';
+
+  await transporter.sendMail({
+    from:    '"ReviewBooster" <' + process.env.SMTP_USER + '>',
+    to:      toEmail,
+    subject: 'New ' + rating + '-star review for ' + businessName,
+    text:    textBody,
+    html:
+      '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">' +
+      '<h2 style="color:#dc2626">New review needs your attention</h2>' +
+      '<p>Hi ' + ownerName + ', you received a new ' + rating + '-star review for ' + businessName + '.</p>' +
+      '<p style="font-size:20px;color:#f59e0b;letter-spacing:2px">' + stars + '</p>' +
+      (cleanFeedback ? '<p style="background:#f9fafb;border-radius:8px;padding:12px;color:#374151">"' + escapeHtml(cleanFeedback) + '"</p>' : '') +
+      '<p style="margin:24px 0"><a href="' + dashboardUrl + '" style="display:inline-block;padding:12px 28px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">View & Reply</a></p>' +
+      '<p style="color:#888;font-size:13px">This is a notification from your ReviewBooster dashboard.</p>' +
+      '</div>',
+  });
+};
+
+module.exports = { sendPasswordResetEmail, sendApprovalEmail, sendRejectionEmail, sendFeedbackAlertEmail };

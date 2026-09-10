@@ -22,6 +22,8 @@ const rateLimit      = require('express-rate-limit');
 
 const User     = require('../models/User');
 const Business = require('../models/Business');
+const BusinessReferral = require('../models/BusinessReferral');
+const BusinessReferralSignup = require('../models/BusinessReferralSignup');
 const auth     = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
 const { asyncWrap } = require('../middleware/errorHandler');
@@ -125,9 +127,14 @@ const loginSchema = Joi.object({
   password: Joi.string().min(1).required(),
 });
 
+const BUSINESS_TYPES = ['salon', 'barbershop', 'gym', 'dental', 'clinic', 'restaurant', 'retail', 'auto', 'real_estate', 'education', 'pet_care', 'other'];
+
 const registerSchema = Joi.object({
-  business_name:     Joi.string().min(2).max(100).required(),
-  business_type:     Joi.string().valid('gym', 'salon', 'clinic', 'restaurant', 'other').required(),
+  business_name:       Joi.string().min(2).max(100).required(),
+  business_type:       Joi.string().valid(...BUSINESS_TYPES).required(),
+  business_type_other: Joi.string().min(2).max(50).when('business_type', {
+    is: 'other', then: Joi.required(), otherwise: Joi.optional().allow('', null),
+  }),
   google_review_url: Joi.string().uri().required(),
   owner_name:        Joi.string().min(2).max(100).required(),
   owner_email:       Joi.string().email().required(),
@@ -141,14 +148,18 @@ const changePasswordSchema = Joi.object({
 });
 
 const signupSchema = Joi.object({
-  business_name:     Joi.string().min(2).max(100).required(),
-  business_type:     Joi.string().valid('gym', 'salon', 'clinic', 'restaurant', 'other').required(),
+  business_name:       Joi.string().min(2).max(100).required(),
+  business_type:       Joi.string().valid(...BUSINESS_TYPES).required(),
+  business_type_other: Joi.string().min(2).max(50).when('business_type', {
+    is: 'other', then: Joi.required(), otherwise: Joi.optional().allow('', null),
+  }),
   owner_name:        Joi.string().min(2).max(100).required(),
   email:             Joi.string().email().required(),
   password:          Joi.string().min(8).required(),
   confirm_password:  Joi.string().valid(Joi.ref('password')).required()
                        .messages({ 'any.only': 'Passwords do not match.' }),
   google_review_url: Joi.string().uri().optional().allow('', null),
+  ref:                Joi.string().trim().max(20).optional().allow('', null),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,7 +181,7 @@ router.post(
     if (error) return res.status(400).json({ error: error.details[0].message });
 
     const {
-      business_name, business_type, google_review_url,
+      business_name, business_type, business_type_other, google_review_url,
       owner_name, owner_email, owner_password, role,
     } = value;
 
@@ -184,10 +195,12 @@ router.post(
     const business = await Business.create({
       name:              business_name,
       type:              business_type,
+      type_other:        business_type === 'other' ? business_type_other : null,
       google_review_url,
       plan:              'trial',
       trial_ends_at:     new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       approval_status:   'approved',
+      source:            'admin_created',
     });
 
     const user = await User.create({
@@ -232,7 +245,7 @@ router.post(
     });
     if (error) return res.status(400).json({ error: error.details[0].message });
 
-    const { business_name, business_type, owner_name, email, password, google_review_url } = value;
+    const { business_name, business_type, business_type_other, owner_name, email, password, google_review_url, ref } = value;
 
     const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
     if (existingUser) {
@@ -241,13 +254,32 @@ router.post(
 
     const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
+    // Engine B — resolve an incoming ?ref= code (if any) to the referring
+    // business before creating this one, so it can be tagged at creation.
+    let referringBusinessReferral = null;
+    if (ref && ref.trim()) {
+      referringBusinessReferral = await BusinessReferral.findOne({ code: ref.trim().toUpperCase() });
+    }
+
     const business = await Business.create({
       name:              business_name,
       type:              business_type,
+      type_other:        business_type === 'other' ? business_type_other : null,
       google_review_url: google_review_url || null,
       plan:              'trial',
       trial_ends_at:     new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      referred_by_business_id: referringBusinessReferral ? referringBusinessReferral.business_id : null,
+      source: 'self_signup',
     });
+
+    if (referringBusinessReferral) {
+      await BusinessReferralSignup.create({
+        referral_id:           referringBusinessReferral._id,
+        referrer_business_id:  referringBusinessReferral.business_id,
+        new_business_id:       business._id,
+      }).catch(() => { /* duplicate-key race on the unique new_business_id — safe to ignore */ });
+    }
+
 
     const user = await User.create({
       business_id:          business._id,
@@ -288,10 +320,10 @@ router.post(
     const passwordMatch = await bcrypt.compare(password, hashToCompare);
 
     if (!user) {
-      return res.status(401).json({ error: 'No account found with that email address.' });
+      return res.status(401).json({ error: 'Invalid email or password.' });
     }
     if (!passwordMatch) {
-      return res.status(401).json({ error: 'Incorrect password. Please try again.' });
+      return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
     if (user.business_id) {

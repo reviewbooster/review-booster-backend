@@ -62,6 +62,27 @@ const ReviewSchema = new Schema(
       default: false,
     },
     /**
+     * Denormalized name (not a ref) so the resolution trail survives even if
+     * the resolving user's account is later deleted.
+     */
+    resolved_by: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    resolved_at: {
+      type: Date,
+      default: null,
+    },
+    /**
+     * Free, keyword-based auto-tags for private feedback (e.g. "Staff",
+     * "Wait Time"). Lets owners spot patterns without reading every entry.
+     */
+    tags: {
+      type: [String],
+      default: [],
+    },
+    /**
      * Cached Claude API response. Populated lazily on first
      * POST /reviews/:id/reply call, re-used on subsequent calls.
      */
@@ -69,11 +90,32 @@ const ReviewSchema = new Schema(
       type: String,
       default: null,
     },
+    /**
+     * Denormalized from the originating ReviewRequest.qr_template so
+     * per-template QR conversion stats don't need a populate/join.
+     */
+    qr_template: {
+      type: String,
+      default: null,
+    },
+    /**
+     * Denormalized from the originating ReviewRequest.served_by — which
+     * staff-directory name (if any) served this customer. Powers the
+     * simple per-staff stats page. Null if attribution isn't used.
+     */
+    served_by: {
+      type: String,
+      trim: true,
+      default: null,
+    },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
   }
 );
+
+// Staff attribution stats aggregation
+ReviewSchema.index({ business_id: 1, served_by: 1 });
 
 // Primary tenant filter, sorted newest-first (dashboard + analytics)
 ReviewSchema.index({ business_id: 1, created_at: -1 });

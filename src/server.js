@@ -10,11 +10,13 @@
 require('dotenv').config();
 
 const app = require('./app');
+const { startTrialExpiryJob } = require('./jobs/trialExpiry');
 
 const PORT = parseInt(process.env.PORT || '5000', 10);
 
 const server = app.listen(PORT, () => {
   console.log(`[server] ReviewBooster API running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
+  startTrialExpiryJob();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

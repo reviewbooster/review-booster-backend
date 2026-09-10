@@ -35,6 +35,24 @@ exports.uploadTemplate = asyncWrap(async (req, res) => {
   res.status(201).json({ data: template });
 });
 
+// PATCH /api/qr-templates/:id — admin only, edit title/description
+exports.updateTemplate = asyncWrap(async (req, res) => {
+  if (req.user.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Forbidden.' });
+  }
+  const { title, description } = req.body;
+  const update = {};
+  if (title !== undefined) {
+    if (!title.trim()) return res.status(400).json({ error: 'Title cannot be empty.' });
+    update.title = title.trim();
+  }
+  if (description !== undefined) update.description = description.trim();
+
+  const template = await QrTemplate.findByIdAndUpdate(req.params.id, update, { new: true });
+  if (!template) return res.status(404).json({ error: 'Template not found.' });
+  res.json({ data: template });
+});
+
 // DELETE /api/qr-templates/:id — admin only
 exports.deleteTemplate = asyncWrap(async (req, res) => {
   if (req.user.role !== 'super_admin') {

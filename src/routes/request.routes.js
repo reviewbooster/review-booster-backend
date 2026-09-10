@@ -3,6 +3,7 @@
 const express   = require('express');
 const router    = express.Router();
 const auth      = require('../middleware/auth');
+const roleGuard = require('../middleware/roleGuard');
 const asyncWrap = require('../utils/asyncWrap');
 const { validate, validateQuery } = require('../middleware/validate');
 const { sendRequestSchema, listRequestsSchema } = require('../validation/request.validation');
@@ -10,7 +11,7 @@ const { sendRequest, listRequests } = require('../controllers/request.controller
 
 router.use(auth);
 
-router.post('/', validate(sendRequestSchema),       asyncWrap(sendRequest));
-router.get('/',  validateQuery(listRequestsSchema), asyncWrap(listRequests));
+router.post('/', roleGuard('owner'),           validate(sendRequestSchema),       asyncWrap(sendRequest));
+router.get('/',  roleGuard('owner', 'staff'),  validateQuery(listRequestsSchema), asyncWrap(listRequests));
 
 module.exports = router;

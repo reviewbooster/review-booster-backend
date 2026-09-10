@@ -7,59 +7,145 @@
 
 const Review = require('../models/Review');
 const Alert  = require('../models/Alert');
+const Business = require('../models/Business');
+const { generateReply } = require('../utils/replyTemplates');
+const { canUseFeature } = require('../utils/planLimits');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
   return { business_id: user.business_id };
 };
 
-// GET /api/reviews — public reviews (4-5 star)
-const listReviews = async (req, res) => {
-  const { rating, channel, page, limit } = req.validatedQuery;
-  const filter = { ...tenantFilter(req.user), is_public: true };
-  if (rating) filter.rating = rating;
-
-  const skip = (page - 1) * limit;
-  const [total, reviews] = await Promise.all([
-    Review.countDocuments(filter),
-    Review.find(filter)
-      .sort({ created_at: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('customer_id', 'name phone email')
-      .select('-__v'),
-  ]);
-
-  const data = channel ? reviews.filter((r) => r.source === channel) : reviews;
-
-  res.json({ data, total: channel ? data.length : total, page, limit, pages: Math.ceil(total / limit) });
+const SORT_OPTIONS = {
+  newest:      { created_at: -1 },
+  oldest:      { created_at: 1 },
+  rating_high: { rating: -1, created_at: -1 },
+  rating_low:  { rating: 1, created_at: -1 },
 };
 
-// GET /api/reviews/private — private feedback (1-3 star)
-const listPrivateFeedback = async (req, res) => {
-  const { is_resolved, page, limit } = req.validatedQuery;
-  const filter = { ...tenantFilter(req.user), is_public: false };
-  if (is_resolved !== undefined) filter.resolved = is_resolved;
+// GET /api/reviews — public reviews (4-5 star)
+const listReviews = async (req, res) => {
+  const { rating, channel, search, start_date, end_date, sort, page, limit } = req.validatedQuery;
+  const filter = { ...tenantFilter(req.user), is_public: true };
+  if (rating)  filter.rating = rating;
+  if (channel) filter.source = channel;
+  if (start_date || end_date) {
+    filter.created_at = {};
+    if (start_date) {
+      const s = new Date(start_date); s.setHours(0, 0, 0, 0);
+      filter.created_at.$gte = s;
+    }
+    if (end_date) {
+      const e = new Date(end_date); e.setHours(23, 59, 59, 999);
+      filter.created_at.$lte = e;
+    }
+  }
 
   const skip = (page - 1) * limit;
-  const [total, feedback] = await Promise.all([
-    Review.countDocuments(filter),
-    Review.find(filter)
-      .sort({ created_at: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('customer_id', 'name phone email')
-      .select('-__v'),
-  ]);
+  const sortSpec = SORT_OPTIONS[sort] || SORT_OPTIONS.newest;
 
-  res.json({ data: feedback, total, page, limit, pages: Math.ceil(total / limit) });
+  let reviews = await Review.find(filter)
+    .populate('customer_id', 'name phone email')
+    .select('-__v')
+    .sort(sortSpec);
+
+  if (search) {
+    const q = search.toLowerCase();
+    reviews = reviews.filter((r) => {
+      const name = r.customer_id && r.customer_id.name ? r.customer_id.name.toLowerCase() : '';
+      const text = r.feedback_text ? r.feedback_text.toLowerCase() : '';
+      return name.includes(q) || text.includes(q);
+    });
+  }
+
+  const total = reviews.length;
+  const data  = reviews.slice(skip, skip + limit);
+
+  res.json({ data, total, page, limit, pages: Math.ceil(total / limit) });
+};
+
+// GET /api/reviews/private -- private feedback (1-3 star)
+const listPrivateFeedback = async (req, res) => {
+  const { rating, channel, tag, search, start_date, end_date, sort, is_resolved, page, limit } = req.validatedQuery;
+  const filter = { ...tenantFilter(req.user), is_public: false };
+  if (is_resolved !== undefined) filter.resolved = is_resolved;
+  if (rating)  filter.rating = rating;
+  if (channel) filter.source = channel;
+  if (tag)     filter.tags = tag;
+  if (start_date || end_date) {
+    filter.created_at = {};
+    if (start_date) {
+      const s = new Date(start_date); s.setHours(0, 0, 0, 0);
+      filter.created_at.$gte = s;
+    }
+    if (end_date) {
+      const e = new Date(end_date); e.setHours(23, 59, 59, 999);
+      filter.created_at.$lte = e;
+    }
+  }
+
+  const skip = (page - 1) * limit;
+  const sortSpec = SORT_OPTIONS[sort] || SORT_OPTIONS.newest;
+
+  const totalUnresolved = await Review.countDocuments({ ...tenantFilter(req.user), is_public: false, resolved: false });
+
+  let feedback = await Review.find(filter)
+    .populate('customer_id', 'name phone email')
+    .select('-__v')
+    .sort(sortSpec);
+
+  if (search) {
+    const q = search.toLowerCase();
+    feedback = feedback.filter((r) => {
+      const name = r.customer_id && r.customer_id.name ? r.customer_id.name.toLowerCase() : '';
+      const text = r.feedback_text ? r.feedback_text.toLowerCase() : '';
+      return name.includes(q) || text.includes(q);
+    });
+  }
+
+  const total = feedback.length;
+  const data  = feedback.slice(skip, skip + limit);
+
+  res.json({ data, total, totalUnresolved, page, limit, pages: Math.ceil(total / limit) });
+};
+
+// POST /api/reviews/:id/generate-reply — template-based draft reply
+const generateReplyForReview = async (req, res) => {
+  const review = await Review.findOne({ _id: req.params.id, ...tenantFilter(req.user) })
+    .populate('customer_id', 'name')
+    .select('-__v');
+
+  if (!review) return res.status(404).json({ error: 'Review not found.' });
+
+  const business = await Business.findById(review.business_id).select('name plan').lean();
+
+  if (req.user.role !== 'super_admin' && !canUseFeature(business?.plan, 'ai_reply')) {
+    return res.status(403).json({ error: 'AI reply drafts aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.' });
+  }
+
+  const draft = generateReply({
+    reviewId: review._id,
+    rating: review.rating,
+    isPublic: review.is_public,
+    customerName: review.customer_id?.name,
+    businessName: business?.name,
+    feedbackText: review.feedback_text,
+  });
+
+  res.json({ data: { draft } });
 };
 
 // PATCH /api/reviews/:id/resolve
 const resolveFeedback = async (req, res) => {
+  // Optional staff-directory name picked at resolve-time (e.g. on a shared
+  // front-desk device) overrides the logged-in account's own name — lets
+  // attribution reflect who actually handled it, not just who's logged in.
+  const { resolved_by } = req.body || {};
+  const cleanResolvedBy = resolved_by && resolved_by.trim() ? resolved_by.trim() : (req.user.name || null);
+
   const review = await Review.findOneAndUpdate(
     { _id: req.params.id, ...tenantFilter(req.user), is_public: false },
-    { $set: { resolved: true } },
+    { $set: { resolved: true, resolved_by: cleanResolvedBy, resolved_at: new Date() } },
     { new: true }
   ).select('-__v');
 
@@ -72,10 +158,36 @@ const resolveFeedback = async (req, res) => {
 
 // GET /api/reviews/export
 const exportReviews = async (req, res) => {
-  const reviews = await Review.find(tenantFilter(req.user))
+  const { rating, channel, search, start_date, end_date } = req.query;
+  const filter = { ...tenantFilter(req.user), is_public: true };
+  if (rating)  filter.rating = parseInt(rating, 10);
+  if (channel) filter.source = channel;
+  if (start_date || end_date) {
+    filter.created_at = {};
+    if (start_date) {
+      const s = new Date(start_date); s.setHours(0, 0, 0, 0);
+      filter.created_at.$gte = s;
+    }
+    if (end_date) {
+      const e = new Date(end_date); e.setHours(23, 59, 59, 999);
+      filter.created_at.$lte = e;
+    }
+  }
+
+  let reviews = await Review.find(filter)
     .sort({ created_at: -1 })
     .populate('customer_id', 'name phone')
     .lean();
+
+  if (search) {
+    const q = String(search).toLowerCase();
+    reviews = reviews.filter(function(r) {
+      const name = (r.customer_id && r.customer_id.name) ? r.customer_id.name.toLowerCase() : '';
+      const text = r.feedback_text ? r.feedback_text.toLowerCase() : '';
+      return name.includes(q) || text.includes(q);
+    });
+  }
+
   const header = ['Date', 'Rating', 'Type', 'Channel', 'Customer Name', 'Phone', 'Feedback'];
   const rows = reviews.map(function(r) {
     return [
@@ -99,4 +211,4 @@ const exportReviews = async (req, res) => {
   res.send(csv);
 };
 
-module.exports = { listReviews, listPrivateFeedback, resolveFeedback, exportReviews };
+module.exports = { listReviews, listPrivateFeedback, resolveFeedback, exportReviews, generateReplyForReview };

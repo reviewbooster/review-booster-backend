@@ -5,6 +5,7 @@ const multer    = require('multer');
 const express   = require('express');
 const router    = express.Router();
 const auth      = require('../middleware/auth');
+const roleGuard = require('../middleware/roleGuard');
 const asyncWrap = require('../utils/asyncWrap');
 const { validate, validateQuery } = require('../middleware/validate');
 const { createCustomerSchema, updateCustomerSchema, listCustomersSchema } = require('../validation/customer.validation');
@@ -20,7 +21,6 @@ const {
   exportCustomers,
 } = require('../controllers/customer.controller');
 
-// ── Multer: memory storage, 500 KB cap, CSV/XLSX only ─────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits:  { fileSize: 512 * 1024 },
@@ -33,11 +33,12 @@ const upload = multer({
 
 router.use(auth);
 
-router.get('/',  validateQuery(listCustomersSchema), asyncWrap(listCustomers));
-router.post('/', validate(createCustomerSchema),     asyncWrap(createCustomer));
+router.get('/',  roleGuard('owner', 'staff'), validateQuery(listCustomersSchema), asyncWrap(listCustomers));
 
-// Import — MUST be before /:id routes
+router.post('/', roleGuard('owner'), validate(createCustomerSchema),     asyncWrap(createCustomer));
+
 router.post('/import',
+  roleGuard('owner'),
   (req, res, next) => upload.single('file')(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message });
     next();
@@ -45,11 +46,11 @@ router.post('/import',
   asyncWrap(importCustomers)
 );
 
-router.get('/export',        asyncWrap(exportCustomers));
-router.get('/:id',          asyncWrap(getCustomer));
-router.get('/:id/requests',  asyncWrap(getCustomerRequests));
-router.get('/:id/reviews',   asyncWrap(getCustomerReviews));
-router.put('/:id',    validate(updateCustomerSchema), asyncWrap(updateCustomer));
-router.delete('/:id', asyncWrap(deleteCustomer));
+router.get('/export',        roleGuard('owner', 'staff'), asyncWrap(exportCustomers));
+router.get('/:id',           roleGuard('owner', 'staff'), asyncWrap(getCustomer));
+router.get('/:id/requests',  roleGuard('owner', 'staff'), asyncWrap(getCustomerRequests));
+router.get('/:id/reviews',   roleGuard('owner', 'staff'), asyncWrap(getCustomerReviews));
+router.put('/:id',    roleGuard('owner'), validate(updateCustomerSchema), asyncWrap(updateCustomer));
+router.delete('/:id', roleGuard('owner'), asyncWrap(deleteCustomer));
 
 module.exports = router;

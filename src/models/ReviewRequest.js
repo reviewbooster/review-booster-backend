@@ -66,6 +66,27 @@ const ReviewRequestSchema = new Schema(
       // Standard review requests expire in 7 days; QR requests get 90 days (set in controller)
       default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     },
+    /**
+     * Which built-in QR print template this scan came from (e.g. 'table_tent',
+     * 'poster', 'sticker', 'counter_card'). Null for non-QR channels and for
+     * QR scans predating this field (the generic/shared link).
+     */
+    qr_template: {
+      type: String,
+      default: null,
+    },
+    /**
+     * Denormalized staff-directory name (not a ref, same pattern as
+     * resolved_by on Review) — "who served this customer". Set either by
+     * the sender picking a name at send-time, or automatically when the
+     * customer scans a staff-specific QR code. Null if attribution isn't
+     * used for this business or wasn't picked.
+     */
+    served_by: {
+      type: String,
+      trim: true,
+      default: null,
+    },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
