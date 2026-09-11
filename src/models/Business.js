@@ -117,8 +117,9 @@ const BusinessSchema = new Schema(
      * at send time.
      */
     message_templates: {
-      review_request: { type: String, trim: true, default: null },
-      thank_refer:     { type: String, trim: true, default: null },
+      review_request:    { type: String, trim: true, default: null },
+      thank_refer:       { type: String, trim: true, default: null },
+      resolved_followup: { type: String, trim: true, default: null },
     },
   },
   {

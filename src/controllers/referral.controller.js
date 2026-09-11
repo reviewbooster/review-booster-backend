@@ -183,6 +183,14 @@ const getReferralLanding = async (req, res) => {
 
   const settings = await getOrDefaultSettings(referral.business_id._id);
 
+  // Self-check stats for the referrer (A) — since there's no customer login,
+  // their own /ref/:code link doubles as their personal status page.
+  const redeemedCount   = await ReferralSignup.countDocuments({ referral_id: referral._id });
+  const threshold       = settings.reward_threshold || 3;
+  const rewardsEarned   = Math.floor(redeemedCount / threshold);
+  const rewardsPending  = Math.max(0, rewardsEarned - (referral.rewards_claimed || 0));
+  const remainingToNext = threshold - (redeemedCount % threshold);
+
   res.json({
     data: {
       code:          referral.code,
@@ -194,6 +202,14 @@ const getReferralLanding = async (req, res) => {
       instagram:     settings.instagram,
       facebook:      settings.facebook,
       other_contact: settings.other_contact,
+      referral_status: {
+        redeemed_count:     redeemedCount,
+        reward_threshold:   threshold,
+        reward_text:        settings.reward_text,
+        rewards_claimed:    referral.rewards_claimed || 0,
+        rewards_pending:    rewardsPending,
+        remaining_to_next:  remainingToNext,
+      },
     },
   });
 };

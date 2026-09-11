@@ -244,6 +244,9 @@ const updateMySettings = async (req, res) => {
     if (mt.thank_refer !== undefined) {
       business.message_templates.thank_refer = (mt.thank_refer || '').trim() || null;
     }
+    if (mt.resolved_followup !== undefined) {
+      business.message_templates.resolved_followup = (mt.resolved_followup || '').trim() || null;
+    }
   }
 
   await business.save();
