@@ -19,12 +19,17 @@ const asyncWrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
  *   app.use(globalErrorHandler);
  *
  * Handles:
- *  - Mongoose duplicate key (11000) → 409 Conflict
- *  - Mongoose validation errors     → 400 Bad Request
- *  - JWT errors forwarded manually  → already handled in auth.js
- *  - Everything else                → 500 Internal Server Error
+ *  - Mongoose duplicate key (11000) â†’ 409 Conflict
+ *  - Mongoose validation errors     â†’ 400 Bad Request
+ *  - JWT errors forwarded manually  â†’ already handled in auth.js
+ *  - Everything else                â†’ 500 Internal Server Error
  */
 const globalErrorHandler = (err, req, res, _next) => {   // 4-arg signature required by Express
+  // Multer file-size limit exceeded (image uploads)
+  if (err.name === 'MulterError' && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: "That image is too large. Please choose a photo under 10MB." });
+  }
+
   // Mongoose duplicate key error (e.g. unique email on User)
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue || {})[0] ?? 'field';
@@ -42,7 +47,7 @@ const globalErrorHandler = (err, req, res, _next) => {   // 4-arg signature requ
     return res.status(400).json({ error: `Invalid ${err.path}: ${err.value}` });
   }
 
-  // Default — log and return generic message (never expose stack in production)
+  // Default â€” log and return generic message (never expose stack in production)
   const status = err.status || err.statusCode || 500;
   const message =
     process.env.NODE_ENV === 'production'

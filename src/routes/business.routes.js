@@ -12,7 +12,7 @@ const {
 } = require('../controllers/business.controller');
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits:  { fileSize: 3 * 1024 * 1024 },
+  limits:  { fileSize: 10 * 1024 * 1024 }, // 10MB -- phone camera photos are often 3-8MB; Cloudinary resizes to 400x400 regardless
 });
 const requireSuperAdmin = (req, res, next) => {
   if (req.user.role !== 'super_admin') {
