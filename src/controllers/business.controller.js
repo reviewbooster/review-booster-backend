@@ -92,7 +92,7 @@ const getResetRequests = async (req, res) => {
   res.json({ data: users });
 };
 
-// GET /api/business/my-qr — any authenticated user with a business_id
+// GET /api/business/my-qr â€” any authenticated user with a business_id
 const getMyQrToken = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
@@ -112,7 +112,7 @@ const getMyQrToken = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name } });
 };
 
-// GET /api/business/:id/qr — super_admin fetches any business QR token (auto-creates if missing)
+// GET /api/business/:id/qr â€” super_admin fetches any business QR token (auto-creates if missing)
 const getBusinessQr = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -129,7 +129,7 @@ const getBusinessQr = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name } });
 };
 
-// PATCH /api/business/:id/google-url — super_admin only
+// PATCH /api/business/:id/google-url â€” super_admin only
 const updateGoogleUrl = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -295,6 +295,25 @@ const uploadMyLogo = async (req, res) => {
 
   res.json({ data: { brand_logo_url: business.brand_logo_url } });
 };
+
+// DELETE /api/business/my-logo - owner only
+const deleteMyLogo = async (req, res) => {
+  if (!req.user.business_id) {
+    return res.status(403).json({ error: 'No business associated with this account.' });
+  }
+  const cloudinary = require('../config/cloudinary');
+  try {
+    await cloudinary.uploader.destroy('reviewbooster/business-logos/' + String(req.user.business_id));
+  } catch (e) {
+    // Non-fatal -- proceed to clear the DB reference even if the Cloudinary delete fails
+  }
+  const business = await Business.findByIdAndUpdate(
+    req.user.business_id,
+    { brand_logo_url: null },
+    { new: true }
+  ).select('brand_logo_url');
+  res.json({ data: { brand_logo_url: business.brand_logo_url } });
+};
 // GET /api/business/staff - owner only, lists staff accounts for their own business
 const listStaff = async (req, res) => {
   if (!req.user.business_id) {
@@ -364,4 +383,4 @@ const deleteStaff = async (req, res) => {
   res.json({ data: { message: 'Staff account removed.' } });
 };
 
-module.exports = { listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, uploadMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff };
+module.exports = { listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff };

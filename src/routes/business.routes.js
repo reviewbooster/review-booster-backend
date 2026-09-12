@@ -7,7 +7,7 @@ const roleGuard = require('../middleware/roleGuard');
 const asyncWrap = require('../utils/asyncWrap');
 const {
   listBusinesses, deleteBusiness, resetBusinessPassword,
-  getResetRequests, getMyQrToken, getMySettings, updateMySettings, uploadMyLogo,
+  getResetRequests, getMyQrToken, getMySettings, updateMySettings, uploadMyLogo, deleteMyLogo,
   updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff,
 } = require('../controllers/business.controller');
 const upload = multer({
@@ -25,6 +25,7 @@ router.get('/my-qr',          auth,                              asyncWrap(getMy
 router.get('/my-settings',    auth,                              asyncWrap(getMySettings));
 router.patch('/my-settings',  auth, roleGuard('owner'),           asyncWrap(updateMySettings));
 router.post('/my-logo',       auth, roleGuard('owner'), upload.single('logo'), asyncWrap(uploadMyLogo));
+router.delete('/my-logo',     auth, roleGuard('owner'), asyncWrap(deleteMyLogo));
 
 // Staff management -- owner only
 router.get('/staff',          auth, roleGuard('owner'), asyncWrap(listStaff));
