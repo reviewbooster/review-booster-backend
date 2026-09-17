@@ -1,14 +1,14 @@
 'use strict';
 /**
  * controllers/supportChat.controller.js
- * Guest-side functions (no auth — pre-login Help & Support widget) and
+ * Guest-side functions (no auth â€” pre-login Help & Support widget) and
  * admin-side functions (super_admin only, mounted under /api/admin).
  */
 const crypto = require('crypto');
 const SupportChat = require('../models/SupportChat');
 const { sendSupportReplyEmail } = require('../utils/mailer');
 
-// ── Guest side (public, no auth) ────────────────────────────────────────────
+// â”€â”€ Guest side (public, no auth)  -- 
 
 // POST /api/support-chat/start
 const startChat = async (req, res) => {
@@ -59,7 +59,7 @@ const sendGuestMessage = async (req, res) => {
   res.json({ data: { messages: chat.messages } });
 };
 
-// ── Admin side (super_admin only) ───────────────────────────────────────────
+// â”€â”€ Admin side (super_admin only)  -- 
 
 // GET /api/admin/support-chats
 const listChatsAdmin = async (req, res) => {
@@ -110,17 +110,17 @@ const replyChatAdmin = async (req, res) => {
   chat.last_message_at = new Date();
   await chat.save();
 
-  // Best-effort email notification — don't fail the reply if email sending has an issue
+  // Best-effort email notification â€” don't fail the reply if email sending has an issue
   try {
     await sendSupportReplyEmail(chat.guest_email, chat.guest_name, message.trim());
   } catch (e) {
-    // swallow — the reply itself succeeded and is visible in-widget
+    // swallow â€” the reply itself succeeded and is visible in-widget
   }
 
   res.json({ data: chat });
 };
 
-// PATCH /api/admin/support-chats/:id  — body: { status: 'open' | 'closed' }
+// PATCH /api/admin/support-chats/:id  â€” body: { status: 'open' | 'closed' }
 const setChatStatusAdmin = async (req, res) => {
   const { status } = req.body || {};
   if (!['open', 'closed'].includes(status)) {

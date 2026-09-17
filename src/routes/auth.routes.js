@@ -2,14 +2,14 @@
 
 /**
  * Auth routes
- * ───────────────────────────────────────────────────────────────────────────
- * POST /api/auth/signup          — public self-registration
- * POST /api/auth/register        — super_admin creates Business + User
- * POST /api/auth/login           — validates credentials, issues tokens
- * POST /api/auth/refresh         — rotates refresh token, new access token
- * POST /api/auth/logout          — clears refresh cookie
- * POST /api/auth/change-password — forced on first login
- * ───────────────────────────────────────────────────────────────────────────
+ *  -- 
+ * POST /api/auth/signup          â€” public self-registration
+ * POST /api/auth/register        â€” super_admin creates Business + User
+ * POST /api/auth/login           â€” validates credentials, issues tokens
+ * POST /api/auth/refresh         â€” rotates refresh token, new access token
+ * POST /api/auth/logout          â€” clears refresh cookie
+ * POST /api/auth/change-password â€” forced on first login
+ *  -- 
  */
 
 const express        = require('express');
@@ -31,9 +31,9 @@ const { sendPasswordResetEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // Constants
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 const BCRYPT_ROUNDS        = 12;
 const ACCESS_TOKEN_TTL     = process.env.JWT_EXPIRES_IN || '15m';
@@ -41,9 +41,9 @@ const REFRESH_COOKIE_NAME  = 'refresh_token';
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const REFRESH_TOKEN_TTL_S  = 30 * 24 * 60 * 60;
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // Helpers
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 const sha256 = (value) =>
   nodeCrypto.createHash('sha256').update(value).digest('hex');
@@ -83,10 +83,10 @@ const clearRefreshCookie = (res) => {
   });
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Rate limiter — 5 login attempts per 15 minutes per IP+email
+//  -- 
+// Rate limiter â€” 5 login attempts per 15 minutes per IP+email
 // Applied only to POST /auth/login
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 const loginLimiter = rateLimit({
   windowMs:               15 * 60 * 1000,
@@ -103,10 +103,10 @@ const loginLimiter = rateLimit({
   },
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Rate limiter — 5 signup attempts per hour per IP
+//  -- 
+// Rate limiter â€” 5 signup attempts per hour per IP
 // Applied only to POST /auth/signup
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 const signupLimiter = rateLimit({
   windowMs:        60 * 60 * 1000,
@@ -118,9 +118,9 @@ const signupLimiter = rateLimit({
   },
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // Joi validation schemas
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 const loginSchema = Joi.object({
   email:    Joi.string().email().required(),
@@ -162,12 +162,12 @@ const signupSchema = Joi.object({
   ref:                Joi.string().trim().max(20).optional().allow('', null),
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // POST /auth/register
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 /**
  * Super-admin only. Creates a new Business + owner User in one operation.
- * google_review_url is required here — admin always sets it at registration.
+ * google_review_url is required here â€” admin always sets it at registration.
  */
 router.post(
   '/register',
@@ -226,14 +226,14 @@ router.post(
   })
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // POST /auth/signup
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 /**
  * Public self-registration. Creates Business + owner User.
  * Rate-limited to 5 signups per hour per IP.
- * Sets must_change_password: false — user chose their own password.
- * google_review_url is optional — can be added later in Settings.
+ * Sets must_change_password: false â€” user chose their own password.
+ * google_review_url is optional â€” can be added later in Settings.
  */
 router.post(
   '/signup',
@@ -254,7 +254,7 @@ router.post(
 
     const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    // Engine B — resolve an incoming ?ref= code (if any) to the referring
+    // Engine B â€” resolve an incoming ?ref= code (if any) to the referring
     // business before creating this one, so it can be tagged at creation.
     let referringBusinessReferral = null;
     if (ref && ref.trim()) {
@@ -277,7 +277,7 @@ router.post(
         referral_id:           referringBusinessReferral._id,
         referrer_business_id:  referringBusinessReferral.business_id,
         new_business_id:       business._id,
-      }).catch(() => { /* duplicate-key race on the unique new_business_id — safe to ignore */ });
+      }).catch(() => { /* duplicate-key race on the unique new_business_id â€” safe to ignore */ });
     }
 
 
@@ -297,9 +297,9 @@ router.post(
   })
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // POST /auth/login
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 router.post(
   '/login',
@@ -361,9 +361,9 @@ router.post(
   })
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // POST /auth/refresh
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 router.post(
   '/refresh',
@@ -420,9 +420,9 @@ router.post(
   })
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // POST /auth/logout
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 router.post(
   '/logout',
@@ -437,9 +437,9 @@ router.post(
   })
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // POST /auth/change-password
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 router.post(
   '/change-password',
@@ -487,9 +487,9 @@ router.post(
   })
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // POST /auth/forgot-password
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 router.post(
   '/forgot-password',
@@ -534,9 +534,9 @@ router.post(
   })
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // POST /auth/reset-password
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 
 router.post(
   '/reset-password',

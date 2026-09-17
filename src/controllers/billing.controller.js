@@ -1,7 +1,7 @@
 'use strict';
 /**
  * billing.controller.js
- * Manual UPI billing — no payment gateway. Business owners see plan
+ * Manual UPI billing â€” no payment gateway. Business owners see plan
  * pricing + Adcend's UPI details and pay outside the app; a super_admin
  * manually activates the plan once they've confirmed the payment landed.
  * Kept deliberately simple until real payment-gateway billing is built.
@@ -34,7 +34,7 @@ async function getOrCreateAllPlans() {
       missing.map((slug) => ({ slug, name: PLAN_DEFAULTS[slug].name })),
       { ordered: false }
     ).catch(async () => {
-      // Race with another request creating the same docs — just re-read.
+      // Race with another request creating the same docs â€” just re-read.
       return Plan.find({ slug: { $in: missing } });
     });
     (created || []).forEach((p) => { bySlug[p.slug] = p; });
@@ -56,8 +56,8 @@ async function getOrDefaultPlatformSettings() {
   };
 }
 
-// GET /api/billing/plans — any authenticated user, active plans only
-// Trial is never purchasable — it's assigned automatically at signup or
+// GET /api/billing/plans â€” any authenticated user, active plans only
+// Trial is never purchasable â€” it's assigned automatically at signup or
 // manually by admin, so it's excluded here even though it's an editable
 // "plan" entry in the admin Billing Settings screen.
 const getPlans = async (req, res) => {
@@ -66,7 +66,7 @@ const getPlans = async (req, res) => {
   res.json({ data: active });
 };
 
-// GET /api/billing/my-status — any authenticated user with a business_id
+// GET /api/billing/my-status â€” any authenticated user with a business_id
 const getMyBillingStatus = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
@@ -80,7 +80,7 @@ const getMyBillingStatus = async (req, res) => {
   res.json({ data: business });
 };
 
-// GET /api/billing/payment-info?plan=basic — owner or staff
+// GET /api/billing/payment-info?plan=basic â€” owner or staff
 // Everything the frontend needs to show a UPI QR + instructions for a
 // specific plan: the plan's price, Adcend's UPI details, and a ready-made
 // UPI deep link with the amount pre-filled.
@@ -132,15 +132,15 @@ const getPaymentInfo = async (req, res) => {
   });
 };
 
-// ── Admin ──────────────────────────────────────────────────────────────
+// â”€â”€ Admin  -- 
 
-// GET /api/admin/plans — super_admin, all plans (active + inactive)
+// GET /api/admin/plans â€” super_admin, all plans (active + inactive)
 const listPlansAdmin = async (req, res) => {
   const all = await getOrCreateAllPlans();
   res.json({ data: all });
 };
 
-// PATCH /api/admin/plans/:slug — super_admin
+// PATCH /api/admin/plans/:slug â€” super_admin
 const updatePlan = async (req, res) => {
   const { slug } = req.params;
   if (!PLAN_DEFAULTS[slug]) {
@@ -186,13 +186,13 @@ const updatePlan = async (req, res) => {
   res.json({ data: plan });
 };
 
-// GET /api/admin/platform-settings — super_admin
+// GET /api/admin/platform-settings â€” super_admin
 const getPlatformSettingsAdmin = async (req, res) => {
   const settings = await getOrDefaultPlatformSettings();
   res.json({ data: settings });
 };
 
-// PATCH /api/admin/platform-settings — super_admin
+// PATCH /api/admin/platform-settings â€” super_admin
 const updatePlatformSettings = async (req, res) => {
   const { upi_id, upi_payee_name, contact_whatsapp, instructions } = req.body;
 
@@ -211,7 +211,7 @@ const updatePlatformSettings = async (req, res) => {
   res.json({ data: settings });
 };
 
-// POST /api/admin/businesses/:id/activate-plan — super_admin
+// POST /api/admin/businesses/:id/activate-plan â€” super_admin
 // Marks a business as paid on a given plan for N days, starting now.
 // This is the manual step that replaces an automated payment webhook.
 const activateBusinessPlan = async (req, res) => {
@@ -233,7 +233,7 @@ const activateBusinessPlan = async (req, res) => {
 
   business.plan = plan;
   if (plan === 'trial') {
-    // Trial uses trial_ends_at, not plan_expires_at — and doesn't touch
+    // Trial uses trial_ends_at, not plan_expires_at â€” and doesn't touch
     // the Engine B discount flag, since no purchase is happening.
     business.trial_ends_at = new Date(Date.now() + numDays * 24 * 60 * 60 * 1000);
   } else {

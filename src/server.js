@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * server.js — HTTP server entry point
+ * server.js â€” HTTP server entry point
  *
  * Imports the configured Express app and binds it to a port.
  * Separation from app.js allows tests to import app without binding a port.
@@ -19,9 +19,9 @@ const server = app.listen(PORT, () => {
   startTrialExpiryJob();
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 // Graceful shutdown
-// ─────────────────────────────────────────────────────────────────────────────
+//  -- 
 const shutdown = (signal) => {
   console.log(`\n[server] ${signal} received. Shutting down gracefully...`);
   server.close(() => {
@@ -39,13 +39,13 @@ const shutdown = (signal) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
 
-// Catch unhandled promise rejections — log and exit so Railway restarts
+// Catch unhandled promise rejections â€” log and exit so Railway restarts
 process.on('unhandledRejection', (reason) => {
   console.error('[server] Unhandled promise rejection:', reason);
   process.exit(1);
 });
 
-// Catch uncaught exceptions — log and exit
+// Catch uncaught exceptions â€” log and exit
 process.on('uncaughtException', (err) => {
   console.error('[server] Uncaught exception:', err);
   process.exit(1);

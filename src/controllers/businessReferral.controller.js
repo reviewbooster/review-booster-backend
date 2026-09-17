@@ -1,7 +1,7 @@
 'use strict';
 /**
  * businessReferral.controller.js
- * Engine B — businesses referring other businesses to ReviewBooster.
+ * Engine B â€” businesses referring other businesses to ReviewBooster.
  * Same "system tracks, human fulfills" philosophy as everything else:
  * the only thing applied automatically is B's one-time signup discount
  * display. A's reward is always a manual admin action.
@@ -50,7 +50,7 @@ async function findOrCreateBusinessReferral(business_id) {
   throw new Error('Could not generate a unique business referral code.');
 }
 
-// GET /api/business-referrals/my-code — owner
+// GET /api/business-referrals/my-code â€” owner
 const getMyCode = async (req, res) => {
   const business_id = req.user.business_id;
   if (!business_id) {
@@ -66,7 +66,7 @@ const getMyCode = async (req, res) => {
   res.json({ data: { code: referral.code } });
 };
 
-// GET /api/business-referrals/my-stats — owner
+// GET /api/business-referrals/my-stats â€” owner
 const getMyStats = async (req, res) => {
   const business_id = req.user.business_id;
   if (!business_id) {
@@ -102,7 +102,7 @@ const getMyStats = async (req, res) => {
   });
 };
 
-// GET /api/business-referrals/settings — public (shown on signup page)
+// GET /api/business-referrals/settings â€” public (shown on signup page)
 const getPublicSettings = async (req, res) => {
   const settings = await getOrDefaultSettings();
   res.json({
@@ -113,8 +113,8 @@ const getPublicSettings = async (req, res) => {
   });
 };
 
-// GET /api/business-referrals/validate/:code — public, used by the signup
-// page to show "Referred by X — Y% off your first plan" before they submit.
+// GET /api/business-referrals/validate/:code â€” public, used by the signup
+// page to show "Referred by X â€” Y% off your first plan" before they submit.
 const validateCode = async (req, res) => {
   const referral = await BusinessReferral.findOne({ code: (req.params.code || '').toUpperCase().trim() })
     .populate('business_id', 'name');
@@ -130,15 +130,15 @@ const validateCode = async (req, res) => {
   });
 };
 
-// ── Admin ──────────────────────────────────────────────────────────────
+// â”€â”€ Admin  -- 
 
-// GET /api/admin/business-referral-settings — super_admin
+// GET /api/admin/business-referral-settings â€” super_admin
 const getSettingsAdmin = async (req, res) => {
   const settings = await getOrDefaultSettings();
   res.json({ data: settings });
 };
 
-// PATCH /api/admin/business-referral-settings — super_admin
+// PATCH /api/admin/business-referral-settings â€” super_admin
 const updateSettingsAdmin = async (req, res) => {
   const { referrer_reward_type, referrer_reward_value, referrer_reward_text, referred_discount_pct } = req.body;
 
@@ -176,7 +176,7 @@ const updateSettingsAdmin = async (req, res) => {
   res.json({ data: settings });
 };
 
-// GET /api/admin/business-referrals — super_admin — list all signups,
+// GET /api/admin/business-referrals â€” super_admin â€” list all signups,
 // pending ones first, so it's obvious who still needs to be credited.
 const listSignupsAdmin = async (req, res) => {
   const signups = await BusinessReferralSignup.find({})
@@ -199,7 +199,7 @@ const listSignupsAdmin = async (req, res) => {
   });
 };
 
-// POST /api/admin/business-referrals/:id/mark-credited — super_admin
+// POST /api/admin/business-referrals/:id/mark-credited â€” super_admin
 const markCreditedAdmin = async (req, res) => {
   const signup = await BusinessReferralSignup.findByIdAndUpdate(
     req.params.id,

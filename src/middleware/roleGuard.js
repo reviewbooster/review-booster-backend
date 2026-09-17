@@ -2,16 +2,16 @@
 
 /**
  * roleGuard middleware factory
- * ───────────────────────────────────────────────────────────────────────────
- * Usage — pass one or more allowed roles:
+ *  -- 
+ * Usage â€” pass one or more allowed roles:
  *
  *   router.get('/customers', auth, roleGuard('owner', 'staff'), handler);
  *   router.delete('/customers/:id', auth, roleGuard('owner'), handler);
  *   router.get('/admin/businesses', auth, roleGuard('super_admin'), handler);
  *
- * super_admin always passes any roleGuard — they have unrestricted access.
+ * super_admin always passes any roleGuard â€” they have unrestricted access.
  * Must be used AFTER the auth middleware so req.user is populated.
- * ───────────────────────────────────────────────────────────────────────────
+ *  -- 
  *
  * @param  {...string} allowedRoles - One or more role strings to permit.
  * @returns {Function} Express middleware
@@ -23,7 +23,7 @@ const roleGuard = (...allowedRoles) => {
 
   return (req, res, next) => {
     if (!req.user) {
-      // Should not happen — auth middleware must run first
+      // Should not happen â€” auth middleware must run first
       return res.status(401).json({ error: 'Unauthenticated. Use auth middleware before roleGuard.' });
     }
 
