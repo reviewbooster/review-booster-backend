@@ -57,6 +57,13 @@ const CustomerSchema = new Schema(
       type: Date,
       default: null,
     },
+    // Set (best-effort) when a win-back WhatsApp link is opened for this
+    // customer. Used only to stop re-suggesting them every day -- see
+    // winback.controller.js getDueCustomers.
+    last_winback_sent: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: { createdAt: 'added_at', updatedAt: 'updated_at' },

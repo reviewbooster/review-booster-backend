@@ -27,7 +27,7 @@ const BusinessReferralSignup = require('../models/BusinessReferralSignup');
 const auth     = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
 const { asyncWrap } = require('../middleware/errorHandler');
-const { sendPasswordResetEmail, sendNewSignupNotification } = require('../utils/mailer');
+const { sendPasswordResetEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -291,8 +291,6 @@ router.post(
       must_change_password: false,
     });
 
-    sendNewSignupNotification(owner_name, business.name, business.type, email).catch(function() { /* non-critical -- never block signup on this */ });
-
     const accessToken     = signAccessToken(user);
     const rawRefreshToken = generateRefreshToken();
     await User.updateOne(
@@ -309,8 +307,6 @@ router.post(
         email:       user.email,
         role:        user.role,
         business_id: user.business_id,
-        must_change_password: false,
-        onboarding_completed: false,
       },
     });
   })
@@ -345,9 +341,8 @@ router.post(
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    let onboardingCompleted = true;
     if (user.business_id) {
-      const business = await Business.findById(user.business_id).select('is_suspended approval_status onboarding_completed').lean();
+      const business = await Business.findById(user.business_id).select('is_suspended approval_status').lean();
       if (business && business.is_suspended) {
         return res.status(403).json({ error: 'This account has been suspended. Contact support.' });
       }
@@ -357,7 +352,6 @@ router.post(
       if (business && business.approval_status === 'rejected') {
         return res.status(403).json({ error: 'Your account was not approved. Please contact support.', code: 'ACCOUNT_REJECTED' });
       }
-      onboardingCompleted = business ? !!business.onboarding_completed : true;
     }
 
     const accessToken    = signAccessToken(user);
@@ -377,7 +371,6 @@ router.post(
         email:       user.email,
         role:        user.role,
         business_id: user.business_id,
-        onboarding_completed: onboardingCompleted,
       },
     });
   })
@@ -404,9 +397,8 @@ router.post(
       return res.status(401).json({ error: 'Invalid or expired refresh token. Please log in again.' });
     }
 
-    let onboardingCompleted = true;
     if (user.business_id) {
-      const business = await Business.findById(user.business_id).select('is_suspended approval_status onboarding_completed').lean();
+      const business = await Business.findById(user.business_id).select('is_suspended approval_status').lean();
       if (business && business.is_suspended) {
         clearRefreshCookie(res);
         return res.status(403).json({ error: 'Account suspended.' });
@@ -419,7 +411,6 @@ router.post(
         clearRefreshCookie(res);
         return res.status(403).json({ error: 'Account not approved.', code: 'ACCOUNT_REJECTED' });
       }
-      onboardingCompleted = business ? !!business.onboarding_completed : true;
     }
 
     const newAccessToken    = signAccessToken(user);
@@ -439,7 +430,6 @@ router.post(
         role:                 user.role,
         business_id:          user.business_id,
         must_change_password: user.must_change_password,
-        onboarding_completed: onboardingCompleted,
       },
     });
   })

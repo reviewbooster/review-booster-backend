@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 require('dns').setDefaultResultOrder('ipv4first');
 const nodemailer = require('nodemailer');
 
@@ -130,38 +130,4 @@ const sendSupportReplyEmail = async (toEmail, guestName, replyText) => {
   });
 };
 
-const sendNewSignupNotification = async (ownerName, businessName, businessType, ownerEmail) => {
-  const adminEmail = process.env.ADMIN_EMAIL || 'adcendco@gmail.com';
-  const transporter = createTransporter();
-  const adminUrl = (process.env.FRONTEND_URL || '') + '/dashboard/admin';
-
-  const textBody =
-    'A new business just signed up.\n\n' +
-    'Business: ' + businessName + '\n' +
-    'Type: ' + businessType + '\n' +
-    'Owner: ' + ownerName + ' (' + ownerEmail + ')\n\n' +
-    'They already have full access -- no approval needed.\n\n' +
-    'View in Admin Panel: ' + adminUrl;
-
-  await transporter.sendMail({
-    from:    '"ReviewBooster" <' + process.env.SMTP_USER + '>',
-    to:      adminEmail,
-    subject: 'New signup: ' + businessName,
-    text:    textBody,
-    html:
-      '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">' +
-      '<h2 style="color:#7c3aed">New business signed up</h2>' +
-      '<table style="width:100%;border-collapse:collapse;margin:16px 0">' +
-      '<tr><td style="padding:6px 0;color:#888;font-size:13px">Business</td><td style="padding:6px 0;font-weight:bold">' + escapeHtml(businessName) + '</td></tr>' +
-      '<tr><td style="padding:6px 0;color:#888;font-size:13px">Type</td><td style="padding:6px 0">' + escapeHtml(businessType) + '</td></tr>' +
-      '<tr><td style="padding:6px 0;color:#888;font-size:13px">Owner</td><td style="padding:6px 0">' + escapeHtml(ownerName) + '</td></tr>' +
-      '<tr><td style="padding:6px 0;color:#888;font-size:13px">Email</td><td style="padding:6px 0">' + escapeHtml(ownerEmail) + '</td></tr>' +
-      '</table>' +
-      '<p style="color:#666;font-size:13px">They already have full access -- no approval needed.</p>' +
-      '<p style="margin:24px 0"><a href="' + adminUrl + '" style="display:inline-block;padding:12px 28px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">View in Admin Panel</a></p>' +
-      '<p style="color:#888;font-size:13px">Powered by Adcend</p>' +
-      '</div>',
-  });
-};
-
-module.exports = { sendPasswordResetEmail, sendApprovalEmail, sendRejectionEmail, sendFeedbackAlertEmail, sendSupportReplyEmail, sendNewSignupNotification };
+module.exports = { sendPasswordResetEmail, sendApprovalEmail, sendRejectionEmail, sendFeedbackAlertEmail, sendSupportReplyEmail };

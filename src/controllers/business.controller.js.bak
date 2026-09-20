@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 /**
  * business.controller.js
  * Super-admin: list, delete businesses, reset passwords.
@@ -92,7 +92,7 @@ const getResetRequests = async (req, res) => {
   res.json({ data: users });
 };
 
-// GET /api/business/my-qr Ã¢â‚¬â€ any authenticated user with a business_id
+// GET /api/business/my-qr â€” any authenticated user with a business_id
 const getMyQrToken = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
@@ -112,7 +112,7 @@ const getMyQrToken = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name } });
 };
 
-// GET /api/business/:id/qr Ã¢â‚¬â€ super_admin fetches any business QR token (auto-creates if missing)
+// GET /api/business/:id/qr â€” super_admin fetches any business QR token (auto-creates if missing)
 const getBusinessQr = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -129,7 +129,7 @@ const getBusinessQr = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name } });
 };
 
-// PATCH /api/business/:id/google-url Ã¢â‚¬â€ super_admin only
+// PATCH /api/business/:id/google-url â€” super_admin only
 const updateGoogleUrl = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -179,7 +179,7 @@ const getMySettings = async (req, res) => {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
   const business = await Business.findById(req.user.business_id)
-    .select('name type type_other google_review_url whatsapp_consent_required plan trial_ends_at brand_logo_url created_at message_templates onboarding_completed')
+    .select('name type type_other google_review_url whatsapp_consent_required plan trial_ends_at brand_logo_url created_at message_templates')
     .lean();
   if (!business) {
     return res.status(404).json({ error: 'Business not found.' });
@@ -192,7 +192,7 @@ const updateMySettings = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
-  const { name, type, type_other, google_review_url, whatsapp_consent_required, message_templates, onboarding_completed } = req.body;
+  const { name, type, type_other, google_review_url, whatsapp_consent_required, message_templates } = req.body;
 
   const business = await Business.findById(req.user.business_id);
   if (!business) {
@@ -249,10 +249,6 @@ const updateMySettings = async (req, res) => {
     }
   }
 
-  if (onboarding_completed !== undefined) {
-    business.onboarding_completed = !!onboarding_completed;
-  }
-
   await business.save();
 
   res.json({ data: {
@@ -265,7 +261,6 @@ const updateMySettings = async (req, res) => {
     trial_ends_at: business.trial_ends_at,
     brand_logo_url: business.brand_logo_url,
     message_templates: business.message_templates,
-    onboarding_completed: business.onboarding_completed,
   } });
 };
 
