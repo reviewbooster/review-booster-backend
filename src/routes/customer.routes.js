@@ -19,7 +19,14 @@ const {
   getCustomerRequests,
   getCustomerReviews,
   exportCustomers,
+  getCustomerTags,
 } = require('../controllers/customer.controller');
+const {
+  getNextFollowUp,
+  setFollowUp,
+  completeFollowUp,
+  cancelFollowUp,
+} = require('../controllers/followup.controller');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -47,9 +54,14 @@ router.post('/import',
 );
 
 router.get('/export',        roleGuard('owner', 'staff'), asyncWrap(exportCustomers));
+router.get('/tags',          roleGuard('owner', 'staff'), asyncWrap(getCustomerTags));
 router.get('/:id',           roleGuard('owner', 'staff'), asyncWrap(getCustomer));
 router.get('/:id/requests',  roleGuard('owner', 'staff'), asyncWrap(getCustomerRequests));
 router.get('/:id/reviews',   roleGuard('owner', 'staff'), asyncWrap(getCustomerReviews));
+router.get('/:id/follow-up',           roleGuard('owner', 'staff'), asyncWrap(getNextFollowUp));
+router.put('/:id/follow-up',           roleGuard('owner', 'staff'), asyncWrap(setFollowUp));
+router.post('/:id/follow-up/complete', roleGuard('owner', 'staff'), asyncWrap(completeFollowUp));
+router.delete('/:id/follow-up',        roleGuard('owner', 'staff'), asyncWrap(cancelFollowUp));
 router.put('/:id',    roleGuard('owner'), validate(updateCustomerSchema), asyncWrap(updateCustomer));
 router.delete('/:id', roleGuard('owner'), asyncWrap(deleteCustomer));
 

@@ -1,7 +1,7 @@
 'use strict';
 const Joi = require('joi');
 
-// Create â€” phone OR email required (need at least one to send a request)
+// Create — phone OR email required (need at least one to send a request)
 const createCustomerSchema = Joi.object({
   name:  Joi.string().trim().min(1).max(100).required(),
   phone: Joi.string().trim().pattern(/^\+[1-9]\d{6,14}$/).message('Phone must be in E.164 format, e.g. +919876543210').optional().allow('', null),
@@ -9,7 +9,7 @@ const createCustomerSchema = Joi.object({
   notes: Joi.string().trim().max(500).optional().allow('', null),
 }).or('phone', 'email');
 
-// Update â€” all optional, but at least one field must be sent
+// Update — all optional, but at least one field must be sent
 const updateCustomerSchema = Joi.object({
   name:  Joi.string().trim().min(1).max(100).optional(),
   phone: Joi.string().trim().pattern(/^\+[1-9]\d{6,14}$/).message('Phone must be in E.164 format, e.g. +919876543210').optional().allow('', null),
@@ -19,12 +19,13 @@ const updateCustomerSchema = Joi.object({
   opted_out: Joi.boolean().optional(),
 }).min(1);
 
-// List â€” query params
+// List — query params
 const listCustomersSchema = Joi.object({
   search: Joi.string().trim().max(100).optional().allow(''),
   page:   Joi.number().integer().min(1).default(1),
   limit:  Joi.number().integer().min(1).max(100).default(20),
   sort:   Joi.string().valid('newest', 'oldest', 'name_asc', 'name_desc', 'qr').default('newest'),
+  tag:    Joi.string().trim().max(30).optional().allow(''),
 });
 
 module.exports = { createCustomerSchema, updateCustomerSchema, listCustomersSchema };

@@ -22,6 +22,7 @@ const createNotification = async ({
     if (users.length) {
       const url = entity_type === 'review' ? '/dashboard/reviews'
         : entity_type === 'feedback' ? '/dashboard/feedback'
+        : entity_type === 'follow_up' ? '/dashboard/follow-ups'
         : '/dashboard';
       await sendPushToUsers(users.map((u) => u._id), { title, body: message, url });
     }

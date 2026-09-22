@@ -10,6 +10,7 @@ const Customer        = require('../models/Customer');
 const ReviewRequest   = require('../models/ReviewRequest');
 const Review          = require('../models/Review');
 const Business        = require('../models/Business');
+const FollowUp        = require('../models/FollowUp');
 const { getPlanLimits } = require('../utils/planLimits');
 
 const tenantFilter = (user) => {
@@ -32,11 +33,21 @@ const SORT_OPTIONS = {
 
 // GET /api/customers
 const listCustomers = async (req, res) => {
-  const { search, page, limit, sort } = req.validatedQuery;
+  const { search, page, limit, sort, tag } = req.validatedQuery;
   const status = req.query.status;
+  const dueFollowUp = req.query.due_followup === 'true';
   const filter = tenantFilter(req.user);
   if (status === 'active')   filter.opted_out = false;
   if (status === 'inactive') filter.opted_out = true;
+  if (tag) filter.tags = tag;
+  if (dueFollowUp && req.user.business_id) {
+    const dueIds = await FollowUp.find({
+      business_id: req.user.business_id,
+      status: 'open',
+      due_date: { $lte: new Date() },
+    }).distinct('customer_id');
+    filter._id = { $in: dueIds };
+  }
   if (search) {
     var safeSearch = escapeRegex(search);
     filter.$or = [
@@ -355,6 +366,17 @@ const getCustomerReviews = async (req, res) => {
   res.json({ data: reviews });
 };
 
+// GET /api/customers/tags -- distinct custom segment tags currently in use
+// for this business, so the Segment filter can offer any tag an owner has
+// actually created, not just the three built-in ones.
+const SYSTEM_TAGS = ['referral', 'qr_scan'];
+const getCustomerTags = async (req, res) => {
+  const filter = tenantFilter(req.user);
+  const tags = await Customer.distinct('tags', filter);
+  const custom = tags.filter((t) => t && SYSTEM_TAGS.indexOf(t) === -1).sort();
+  res.json({ data: custom });
+};
+
 module.exports = {
   listCustomers,
   createCustomer,
@@ -365,4 +387,5 @@ module.exports = {
   getCustomerRequests,
   getCustomerReviews,
   exportCustomers,
+  getCustomerTags,
 };

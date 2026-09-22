@@ -110,7 +110,6 @@ app.use('/api/staff-directory', require('./routes/staff.routes'));
 app.use('/api/business-referrals', publicLimiter, require('./routes/businessReferral.routes'));
 app.use('/api/billing', require('./routes/billing.routes'));
 app.use('/api/win-back', require('./routes/winback.routes'));
-app.use('/api/follow-ups', require('./routes/followup.routes'));
 app.use('/api/support-chat', publicLimiter, require('./routes/supportChat.routes'));
 
 //  -- 
