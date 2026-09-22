@@ -11,6 +11,7 @@ const Review        = require('../models/Review');
 const Alert         = require('../models/Alert');
 const User          = require('../models/User');
 const StaffMember   = require('../models/StaffMember');
+const FollowUp      = require('../models/FollowUp');
 const { createNotification } = require('../utils/notificationHelper');
 const { sendFeedbackAlertEmail } = require('../utils/mailer');
 const { generateTags } = require('../utils/feedbackTagger');
@@ -18,7 +19,7 @@ const { generateTags } = require('../utils/feedbackTagger');
 // GET /api/r/:token
 const validateToken = async (req, res) => {
   const request = await ReviewRequest.findOne({ unique_token: req.params.token })
-    .populate('business_id', 'name google_review_url brand_logo_url')
+    .populate('business_id', 'name google_review_url brand_logo_url type')
     .populate('customer_id', 'name');
 
   if (!request) {
@@ -41,6 +42,7 @@ const validateToken = async (req, res) => {
   res.json({
     data: {
       business_name:     request.business_id.name,
+      business_type:     request.business_id.type || null,
       google_review_url: request.business_id.google_review_url,
       logo_url:          request.business_id.brand_logo_url || null,
       customer_name:     request.customer_id ? request.customer_id.name : null,
@@ -51,7 +53,7 @@ const validateToken = async (req, res) => {
 
 // POST /api/r/:token/submit
 const submitReview = async (req, res) => {
-  const { rating, feedback } = req.body;
+  const { rating, feedback, tags: customerTags, request_followup } = req.body;
 
   const request = await ReviewRequest.findOne({ unique_token: req.params.token });
 
@@ -75,6 +77,21 @@ const submitReview = async (req, res) => {
   // Fetched up front so tagging can be business-type-aware (see feedbackTagger.js).
   const taggingBusiness = await Business.findById(request.business_id).select('type').lean();
 
+  // Categories the customer explicitly tapped on the review page (issue
+  // chips for 1-3 stars, experience chips for 4-5 stars) -- real signal,
+  // not a guess. Capped and sanitized since this is a public, unauthenticated
+  // endpoint. For public reviews there's no feedback_text to derive tags
+  // from at all, so this is the ONLY source of categories on that side --
+  // the actual review text the customer posts to Google is never sent to
+  // us, only which categories they picked.
+  const cleanCustomerTags = Array.isArray(customerTags)
+    ? customerTags.filter((t) => typeof t === 'string' && t.trim()).map((t) => t.trim().slice(0, 40)).slice(0, 10)
+    : [];
+
+  const finalTags = isPublic
+    ? cleanCustomerTags
+    : Array.from(new Set(cleanCustomerTags.concat(generateTags(feedback, taggingBusiness ? taggingBusiness.type : null))));
+
   const review = await Review.create({
     business_id:   request.business_id,
     customer_id:   request.customer_id,
@@ -82,9 +99,10 @@ const submitReview = async (req, res) => {
     rating,
     is_public:     isPublic,
     feedback_text: isPublic ? null : feedback,
+    public_review_text: isPublic && feedback ? String(feedback).trim().slice(0, 1000) : null,
     source:        request.channel,
     resolved:      false,
-    tags:          isPublic ? [] : generateTags(feedback, taggingBusiness ? taggingBusiness.type : null),
+    tags:          finalTags,
     qr_template:   request.qr_template || null,
     served_by:     request.served_by || null,
   });
@@ -94,6 +112,24 @@ const submitReview = async (req, res) => {
     { _id: request._id },
     { $set: { status: 'completed' } }
   );
+
+  // Customer explicitly asked to be followed up with -- only possible when
+  // we have a customer on file (identified via WhatsApp/SMS/Email send, or
+  // the QR identify step). Same one-open-follow-up-per-customer upsert
+  // pattern as the dashboard's own follow-up flow, marked so the owner can
+  // tell it was customer-requested rather than owner-scheduled.
+  if (request_followup && request.customer_id) {
+    var followUpDue = new Date();
+    followUpDue.setDate(followUpDue.getDate() + 3);
+    await FollowUp.findOneAndUpdate(
+      { business_id: request.business_id, customer_id: request.customer_id, status: 'open' },
+      {
+        $set: { due_date: followUpDue, note: '[Customer requested] Asked to be followed up with after their feedback.', notified: false },
+        $setOnInsert: { business_id: request.business_id, customer_id: request.customer_id, status: 'open', created_at: new Date() },
+      },
+      { upsert: true, new: true }
+    );
+  }
 
   // Create alert for owner on low-star reviews
   if (!isPublic) {

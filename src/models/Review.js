@@ -143,6 +143,35 @@ const ReviewSchema = new Schema(
      * reopening this feedback later still shows what was said, instead of
      * just that something was sent. Null until the first reply is sent.
      */
+    /**
+     * Full history of replies sent for this feedback -- appended to on every
+     * send, never overwritten, so "Send another reply" doesn't erase what
+     * was said before (Section 5 of the PDF: "No lost conversations").
+     * reply_text/reply_sent_at/reply_channel above still track the MOST
+     * RECENT send as a convenience for anything that just wants "the latest
+     * reply" without walking this array.
+     */
+    replies: {
+      type: [{
+        channel: { type: String, enum: ['whatsapp', 'sms', 'email'] },
+        text:    { type: String, trim: true, maxlength: 2000 },
+        sent_at: { type: Date, default: Date.now },
+      }],
+      default: [],
+    },
+    /**
+     * For public (4-5 star) reviews only: the actual text the customer
+     * copied to post on Google, captured when they tap "Copy draft" --
+     * never for feedback_text, which stays scoped to private-feedback
+     * complaint text. Null if they skipped the draft or never copied
+     * anything.
+     */
+    public_review_text: {
+      type: String,
+      trim: true,
+      maxlength: [1000, 'Review text cannot exceed 1000 characters'],
+      default: null,
+    },
     reply_text: {
       type: String,
       trim: true,

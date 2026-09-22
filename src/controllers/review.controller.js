@@ -121,6 +121,45 @@ const listFeedbackTags = async (req, res) => {
   res.json({ data: tags.filter(Boolean).sort() });
 };
 
+// GET /api/reviews/theme-summary â€” an honest, zero-cost substitute for AI
+// feedback summarization: how often each category comes up, split by
+// positive (public) vs negative (private) feedback, over a window of
+// recent reviews. Real counts, not a generated summary of free text --
+// there's no attempt to paraphrase what customers wrote, only to surface
+// which structured categories they actually picked most.
+const getThemeSummary = async (req, res) => {
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+
+  const base = { ...tenantFilter(req.user), created_at: { $gte: since } };
+
+  const [positiveAgg, negativeAgg] = await Promise.all([
+    Review.aggregate([
+      { $match: { ...base, is_public: true } },
+      { $unwind: '$tags' },
+      { $group: { _id: '$tags', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 10 },
+    ]),
+    Review.aggregate([
+      { $match: { ...base, is_public: false } },
+      { $unwind: '$tags' },
+      { $group: { _id: '$tags', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 10 },
+    ]),
+  ]);
+
+  res.json({
+    data: {
+      days,
+      positive: positiveAgg.map((r) => ({ label: r._id, count: r.count })),
+      negative: negativeAgg.map((r) => ({ label: r._id, count: r.count })),
+    },
+  });
+};
+
 // GET /api/reviews/:id/customer-context â€” a few honest facts about the
 // customer this feedback belongs to, fetched only when the detail modal
 // opens (not on every list load). No invented numbers: just what's on
@@ -292,10 +331,14 @@ const markFeedbackSent = async (req, res) => {
     return res.status(400).json({ error: '"channel" must be one of: ' + VALID_SEND_CHANNELS.join(', ') + '.' });
   }
   const cleanReplyText = (reply_text || '').trim().slice(0, 2000) || null;
+  const now = new Date();
 
   const review = await Review.findOneAndUpdate(
     { _id: req.params.id, ...tenantFilter(req.user), is_public: false },
-    { $set: { stage: 'awaiting_confirmation', reply_sent_at: new Date(), reply_channel: channel, reply_text: cleanReplyText } },
+    {
+      $set: { stage: 'awaiting_confirmation', reply_sent_at: now, reply_channel: channel, reply_text: cleanReplyText },
+      $push: { replies: { channel, text: cleanReplyText, sent_at: now } },
+    },
     { new: true }
   ).select('-__v');
 
@@ -320,4 +363,4 @@ const setFeedbackNotes = async (req, res) => {
   res.json({ data: review });
 };
 
-module.exports = { listReviews, listPrivateFeedback, listFeedbackTags, getCustomerContext, resolveFeedback, exportReviews, generateReplyForReview, setFeedbackStage, markFeedbackSent, setFeedbackNotes };
+module.exports = { listReviews, listPrivateFeedback, listFeedbackTags, getThemeSummary, getCustomerContext, resolveFeedback, exportReviews, generateReplyForReview, setFeedbackStage, markFeedbackSent, setFeedbackNotes };

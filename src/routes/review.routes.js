@@ -7,12 +7,13 @@ const roleGuard = require('../middleware/roleGuard');
 const asyncWrap = require('../utils/asyncWrap');
 const { validateQuery } = require('../middleware/validate');
 const { listReviewsSchema } = require('../validation/review.validation');
-const { listReviews, listPrivateFeedback, listFeedbackTags, getCustomerContext, resolveFeedback, exportReviews, generateReplyForReview, setFeedbackStage, markFeedbackSent, setFeedbackNotes } = require('../controllers/review.controller');
+const { listReviews, listPrivateFeedback, listFeedbackTags, getThemeSummary, getCustomerContext, resolveFeedback, exportReviews, generateReplyForReview, setFeedbackStage, markFeedbackSent, setFeedbackNotes } = require('../controllers/review.controller');
 
 router.use(auth);
 
 router.get('/export',        roleGuard('owner', 'staff'), asyncWrap(exportReviews));
 router.get('/tags',          roleGuard('owner', 'staff'), asyncWrap(listFeedbackTags));
+router.get('/theme-summary', roleGuard('owner', 'staff'), asyncWrap(getThemeSummary));
 router.get('/private',       roleGuard('owner', 'staff'), validateQuery(listReviewsSchema), asyncWrap(listPrivateFeedback));
 router.get('/',               roleGuard('owner', 'staff'), validateQuery(listReviewsSchema), asyncWrap(listReviews));
 
