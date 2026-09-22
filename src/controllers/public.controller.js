@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /**
  * public.controller.js
  * NO authentication -- hit by customers clicking review links.
@@ -72,6 +72,9 @@ const submitReview = async (req, res) => {
 
   const isPublic = rating >= 4;
 
+  // Fetched up front so tagging can be business-type-aware (see feedbackTagger.js).
+  const taggingBusiness = await Business.findById(request.business_id).select('type').lean();
+
   const review = await Review.create({
     business_id:   request.business_id,
     customer_id:   request.customer_id,
@@ -81,7 +84,7 @@ const submitReview = async (req, res) => {
     feedback_text: isPublic ? null : feedback,
     source:        request.channel,
     resolved:      false,
-    tags:          isPublic ? [] : generateTags(feedback),
+    tags:          isPublic ? [] : generateTags(feedback, taggingBusiness ? taggingBusiness.type : null),
     qr_template:   request.qr_template || null,
     served_by:     request.served_by || null,
   });
@@ -160,7 +163,7 @@ const getQrReview = async (req, res) => {
   const rawTemplate  = typeof req.query.template === 'string' ? req.query.template.toLowerCase().trim() : null;
   const qr_template  = QR_TEMPLATE_KEYS.includes(rawTemplate) ? rawTemplate : null;
 
-  // Staff-specific QR — each staff-directory member can have their own
+  // Staff-specific QR â€” each staff-directory member can have their own
   // sticker/QR (?staff=<id>) that auto-attributes the resulting review
   // request to them, with zero selection needed from anyone.
   let served_by = null;
@@ -184,8 +187,8 @@ const getQrReview = async (req, res) => {
   res.json({ data: { token: unique_token } });
 };
 
-// POST /api/r/:token/identify — optional name/phone capture for anonymous
-// (mainly QR) requests. Skippable — the frontend simply won't call this if
+// POST /api/r/:token/identify â€” optional name/phone capture for anonymous
+// (mainly QR) requests. Skippable â€” the frontend simply won't call this if
 // the customer chooses Skip.
 const identifyCustomer = async (req, res) => {
   const { name, phone } = req.body;
@@ -198,7 +201,7 @@ const identifyCustomer = async (req, res) => {
     return res.status(410).json({ error: 'This review has already been submitted.' });
   }
   if (request.customer_id) {
-    // Already tied to a known customer (WhatsApp/SMS/Email requests) — nothing to do.
+    // Already tied to a known customer (WhatsApp/SMS/Email requests) â€” nothing to do.
     return res.json({ data: { ok: true } });
   }
   if (!name || !name.trim()) {

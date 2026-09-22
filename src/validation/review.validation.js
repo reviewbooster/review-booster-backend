@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 const Joi = require('joi');
 
 const submitReviewSchema = Joi.object({
@@ -9,7 +9,8 @@ const submitReviewSchema = Joi.object({
 const listReviewsSchema = Joi.object({
   rating:      Joi.number().integer().min(1).max(5).optional(),
   channel:     Joi.string().valid('whatsapp', 'sms', 'email', 'qr').optional(),
-  tag:         Joi.string().valid('Staff', 'Wait Time', 'Pricing', 'Cleanliness', 'Quality').optional(),
+  tag:         Joi.string().trim().max(40).optional(),
+  stage:       Joi.string().valid('new', 'in_progress').optional(),
   search:      Joi.string().trim().max(100).optional().allow(''),
   start_date:  Joi.date().iso().optional(),
   end_date:    Joi.date().iso().optional(),

@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const mongoose = require('mongoose');
 
@@ -7,8 +7,8 @@ const { Schema } = mongoose;
 /**
  * reviews collection
  * Created when a customer submits a star rating via /r/:token/submit.
- * is_public = true  → 4 or 5 stars → owner shown Google redirect link
- * is_public = false → 1, 2, or 3 stars → private feedback, creates Alert
+ * is_public = true  â†’ 4 or 5 stars â†’ owner shown Google redirect link
+ * is_public = false â†’ 1, 2, or 3 stars â†’ private feedback, creates Alert
  */
 const ReviewSchema = new Schema(
   {
@@ -49,7 +49,7 @@ const ReviewSchema = new Schema(
     is_public: {
       type: Boolean,
       required: true,
-      // Set in controller: rating >= 4 → true, else false
+      // Set in controller: rating >= 4 â†’ true, else false
     },
     source: {
       type: String,
@@ -64,7 +64,7 @@ const ReviewSchema = new Schema(
     /**
      * Progress tracking for private feedback BEFORE it's resolved.
      * `resolved` (above) remains the single source of truth for whether a
-     * case is closed — this field is purely for showing where things stand
+     * case is closed â€” this field is purely for showing where things stand
      * on the way there, so it's not read by any existing resolved-based
      * filters/indexes/analytics.
      */
@@ -122,13 +122,40 @@ const ReviewSchema = new Schema(
       default: null,
     },
     /**
-     * Denormalized from the originating ReviewRequest.served_by — which
+     * Denormalized from the originating ReviewRequest.served_by â€” which
      * staff-directory name (if any) served this customer. Powers the
      * simple per-staff stats page. Null if attribution isn't used.
      */
     served_by: {
       type: String,
       trim: true,
+      default: null,
+    },
+    /**
+     * Set when the owner taps a channel button (WhatsApp/SMS/Email) to send
+     * their reply -- records that WE opened the send link, not that the
+     * customer received or read it (there's no delivery-receipt data here,
+     * same honesty limit as everywhere else in the app). Both null until
+     * the first reply is sent; unaffected by resolving the feedback.
+     */
+    /**
+     * The actual reply text that was sent, captured at send time -- so
+     * reopening this feedback later still shows what was said, instead of
+     * just that something was sent. Null until the first reply is sent.
+     */
+    reply_text: {
+      type: String,
+      trim: true,
+      maxlength: [2000, 'Reply cannot exceed 2000 characters'],
+      default: null,
+    },
+    reply_sent_at: {
+      type: Date,
+      default: null,
+    },
+    reply_channel: {
+      type: String,
+      enum: ['whatsapp', 'sms', 'email'],
       default: null,
     },
   },
@@ -143,7 +170,7 @@ ReviewSchema.index({ business_id: 1, served_by: 1 });
 // Primary tenant filter, sorted newest-first (dashboard + analytics)
 ReviewSchema.index({ business_id: 1, created_at: -1 });
 
-// Private feedback tab — unresolved complaints
+// Private feedback tab â€” unresolved complaints
 ReviewSchema.index({ business_id: 1, is_public: 1, resolved: 1 });
 
 // Analytics: weekly rating trend via aggregation
