@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /**
  * analytics.controller.js
  * Aggregated stats for the dashboard overview page.
@@ -204,7 +204,7 @@ const getReviewsOverTime = async (req, res) => {
   });
 };
 
-// GET /api/analytics/qr-stats
+// GET /api/analytics/qr-stats?days=N
 const QR_TEMPLATE_LABELS = {
   table_tent:   'Table Tent',
   poster:       'Poster',
@@ -212,78 +212,71 @@ const QR_TEMPLATE_LABELS = {
   counter_card: 'Counter Card',
 };
 
+const pctChange = (current, prev) => {
+  if (prev > 0) return Math.round(((current - prev) / prev) * 100);
+  return current > 0 ? 100 : 0;
+};
+
 const getQrStats = async (req, res) => {
   const filter = tenantFilter(req.user);
 
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
+  const days = Math.max(1, Math.min(parseInt(req.query.days, 10) || 30, 365));
+  const periodEnd = new Date();
+  periodEnd.setHours(23, 59, 59, 999);
+  const periodStart = new Date();
+  periodStart.setDate(periodStart.getDate() - (days - 1));
+  periodStart.setHours(0, 0, 0, 0);
 
-  const lastMonthStart = new Date(monthStart);
-  lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
-  const lastMonthEnd = new Date(monthStart);
+  const prevEnd = new Date(periodStart.getTime() - 1);
+  const prevStart = new Date(periodStart);
+  prevStart.setDate(prevStart.getDate() - days);
 
   const qrReqFilter    = { ...filter, channel: 'qr' };
   const qrReviewFilter = { ...filter, source:  'qr' };
 
+  const reviewGroup = {
+    _id:           null,
+    total:         { $sum: 1 },
+    total_public:  { $sum: { $cond: [{ $eq: ['$is_public', true]  }, 1, 0] } },
+    total_private: { $sum: { $cond: [{ $eq: ['$is_public', false] }, 1, 0] } },
+    avg_rating:    { $avg: '$rating' },
+  };
+
   const [
-    totalScans,
-    reviewStats,
-    thisMonthScans,
-    thisMonthReviews,
-    lastMonthScans,
-    lastMonthReviews,
+    totalScansAllTime,
+    reviewStatsAllTime,
+    periodScans,
+    periodReviews,
+    prevPeriodScans,
+    prevPeriodReviews,
     scansByTemplate,
     reviewsByTemplate,
   ] = await Promise.all([
     ReviewRequest.countDocuments(qrReqFilter),
+    Review.aggregate([{ $match: qrReviewFilter }, { $group: reviewGroup }]),
+    ReviewRequest.countDocuments({ ...qrReqFilter, created_at: { $gte: periodStart, $lte: periodEnd } }),
     Review.aggregate([
-      { $match: qrReviewFilter },
-      {
-        $group: {
-          _id:           null,
-          total:         { $sum: 1 },
-          total_public:  { $sum: { $cond: [{ $eq: ['$is_public', true]  }, 1, 0] } },
-          total_private: { $sum: { $cond: [{ $eq: ['$is_public', false] }, 1, 0] } },
-          avg_rating:    { $avg: '$rating' },
-        },
-      },
+      { $match: { ...qrReviewFilter, created_at: { $gte: periodStart, $lte: periodEnd } } },
+      { $group: reviewGroup },
     ]),
-    ReviewRequest.countDocuments({ ...qrReqFilter, created_at: { $gte: monthStart } }),
+    ReviewRequest.countDocuments({ ...qrReqFilter, created_at: { $gte: prevStart, $lte: prevEnd } }),
     Review.aggregate([
-      { $match: { ...qrReviewFilter, created_at: { $gte: monthStart } } },
-      {
-        $group: {
-          _id:          null,
-          total:        { $sum: 1 },
-          total_public: { $sum: { $cond: [{ $eq: ['$is_public', true] }, 1, 0] } },
-        },
-      },
-    ]),
-    ReviewRequest.countDocuments({ ...qrReqFilter, created_at: { $gte: lastMonthStart, $lt: lastMonthEnd } }),
-    Review.aggregate([
-      { $match: { ...qrReviewFilter, created_at: { $gte: lastMonthStart, $lt: lastMonthEnd } } },
-      {
-        $group: {
-          _id:          null,
-          total:        { $sum: 1 },
-          total_public: { $sum: { $cond: [{ $eq: ['$is_public', true] }, 1, 0] } },
-        },
-      },
+      { $match: { ...qrReviewFilter, created_at: { $gte: prevStart, $lte: prevEnd } } },
+      { $group: reviewGroup },
     ]),
     ReviewRequest.aggregate([
-      { $match: qrReqFilter },
+      { $match: { ...qrReqFilter, created_at: { $gte: periodStart, $lte: periodEnd } } },
       { $group: { _id: '$qr_template', count: { $sum: 1 } } },
     ]),
     Review.aggregate([
-      { $match: qrReviewFilter },
+      { $match: { ...qrReviewFilter, created_at: { $gte: periodStart, $lte: periodEnd } } },
       { $group: { _id: '$qr_template', count: { $sum: 1 } } },
     ]),
   ]);
 
-  const rs   = reviewStats[0]      || { total: 0, total_public: 0, total_private: 0, avg_rating: 0 };
-  const mtd  = thisMonthReviews[0] || { total: 0, total_public: 0 };
-  const lmtd = lastMonthReviews[0] || { total: 0, total_public: 0 };
+  const rsAllTime = reviewStatsAllTime[0] || { total: 0, total_public: 0, total_private: 0, avg_rating: 0 };
+  const rsPeriod  = periodReviews[0]      || { total: 0, total_public: 0, total_private: 0, avg_rating: 0 };
+  const rsPrev    = prevPeriodReviews[0]  || { total: 0, total_public: 0, total_private: 0, avg_rating: 0 };
 
   const scanMap   = {};
   scansByTemplate.forEach(row => { scanMap[row._id || 'unlabeled'] = row.count; });
@@ -302,24 +295,30 @@ const getQrStats = async (req, res) => {
     };
   }).filter(row => row.scans > 0 || row.reviews > 0);
 
+  const periodConversion = periodScans > 0 ? parseFloat((rsPeriod.total_public / periodScans).toFixed(2)) : 0;
+  const prevConversion   = prevPeriodScans > 0 ? parseFloat((rsPrev.total_public / prevPeriodScans).toFixed(2)) : 0;
+
   res.json({
     data: {
-      total_scans:     totalScans,
-      total_reviews:   rs.total,
-      total_public:    rs.total_public,
-      total_private:   rs.total_private,
-      avg_rating:      rs.avg_rating ? parseFloat(rs.avg_rating.toFixed(1)) : 0,
-      conversion_rate: totalScans > 0 ? parseFloat((rs.total / totalScans).toFixed(2)) : 0,
+      total_scans:     totalScansAllTime,
+      total_reviews:   rsAllTime.total,
+      total_public:    rsAllTime.total_public,
+      total_private:   rsAllTime.total_private,
+      avg_rating:      rsAllTime.avg_rating ? parseFloat(rsAllTime.avg_rating.toFixed(1)) : 0,
+      conversion_rate: totalScansAllTime > 0 ? parseFloat((rsAllTime.total / totalScansAllTime).toFixed(2)) : 0,
       by_template:     byTemplate,
-      this_month: {
-        total_scans:   thisMonthScans,
-        total_reviews: mtd.total,
-        total_public:  mtd.total_public,
+      period_days: days,
+      period: {
+        scans:           periodScans,
+        feedback:        rsPeriod.total_private,
+        reviews:         rsPeriod.total_public,
+        conversion_rate: periodConversion,
       },
-      last_month: {
-        total_scans:   lastMonthScans,
-        total_reviews: lmtd.total,
-        total_public:  lmtd.total_public,
+      period_change: {
+        scans:           pctChange(periodScans, prevPeriodScans),
+        feedback:        pctChange(rsPeriod.total_private, rsPrev.total_private),
+        reviews:         pctChange(rsPeriod.total_public, rsPrev.total_public),
+        conversion_rate: pctChange(periodConversion, prevConversion),
       },
     },
   });

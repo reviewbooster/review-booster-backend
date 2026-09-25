@@ -92,13 +92,13 @@ const getResetRequests = async (req, res) => {
   res.json({ data: users });
 };
 
-// GET /api/business/my-qr Ã¢â‚¬â€ any authenticated user with a business_id
+// GET /api/business/my-qr ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â any authenticated user with a business_id
 const getMyQrToken = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
   const business = await Business.findById(req.user.business_id)
-    .select('qr_token name')
+    .select('qr_token name type')
     .lean();
   if (!business) {
     return res.status(404).json({ error: 'Business not found.' });
@@ -109,10 +109,10 @@ const getMyQrToken = async (req, res) => {
     await doc.save();
     business.qr_token = doc.qr_token;
   }
-  res.json({ data: { qr_token: business.qr_token, business_name: business.name } });
+  res.json({ data: { qr_token: business.qr_token, business_name: business.name, business_type: business.type || null } });
 };
 
-// GET /api/business/:id/qr Ã¢â‚¬â€ super_admin fetches any business QR token (auto-creates if missing)
+// GET /api/business/:id/qr ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â super_admin fetches any business QR token (auto-creates if missing)
 const getBusinessQr = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -129,7 +129,7 @@ const getBusinessQr = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name } });
 };
 
-// PATCH /api/business/:id/google-url Ã¢â‚¬â€ super_admin only
+// PATCH /api/business/:id/google-url ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â super_admin only
 const updateGoogleUrl = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -179,7 +179,7 @@ const getMySettings = async (req, res) => {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
   const business = await Business.findById(req.user.business_id)
-    .select('name type type_other google_review_url whatsapp_consent_required plan trial_ends_at brand_logo_url created_at message_templates onboarding_completed')
+    .select('name type type_other google_review_url whatsapp_consent_required plan trial_ends_at brand_logo_url created_at message_templates onboarding_completed product_intro_seen product_tour_completed product_tour_started tour_skipped')
     .lean();
   if (!business) {
     return res.status(404).json({ error: 'Business not found.' });
@@ -192,7 +192,7 @@ const updateMySettings = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
-  const { name, type, type_other, google_review_url, whatsapp_consent_required, message_templates, onboarding_completed } = req.body;
+  const { name, type, type_other, google_review_url, whatsapp_consent_required, message_templates, onboarding_completed, product_intro_seen, product_tour_completed, product_tour_started, tour_skipped } = req.body;
 
   const business = await Business.findById(req.user.business_id);
   if (!business) {
@@ -253,6 +253,22 @@ const updateMySettings = async (req, res) => {
     business.onboarding_completed = !!onboarding_completed;
   }
 
+  if (product_intro_seen !== undefined) {
+    business.product_intro_seen = !!product_intro_seen;
+  }
+
+  if (product_tour_completed !== undefined) {
+    business.product_tour_completed = !!product_tour_completed;
+  }
+
+  if (product_tour_started !== undefined) {
+    business.product_tour_started = !!product_tour_started;
+  }
+
+  if (tour_skipped !== undefined) {
+    business.tour_skipped = !!tour_skipped;
+  }
+
   await business.save();
 
   res.json({ data: {
@@ -266,6 +282,10 @@ const updateMySettings = async (req, res) => {
     brand_logo_url: business.brand_logo_url,
     message_templates: business.message_templates,
     onboarding_completed: business.onboarding_completed,
+    product_intro_seen: business.product_intro_seen,
+    product_tour_completed: business.product_tour_completed,
+    product_tour_started: business.product_tour_started,
+    tour_skipped: business.tour_skipped,
   } });
 };
 

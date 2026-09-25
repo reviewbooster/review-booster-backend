@@ -1,8 +1,7 @@
-'use strict';
+﻿'use strict';
 const express   = require('express');
 const auth      = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
-const admin     = require('../controllers/admin.controller');
 const billing   = require('../controllers/billing.controller');
 const businessReferral = require('../controllers/businessReferral.controller');
 const auditLog = require('../controllers/auditLog.controller');
@@ -14,12 +13,7 @@ const router = express.Router();
 router.use(auth);
 router.use(roleGuard('super_admin'));
 
-router.get('/pending-count',          admin.getPendingCount);
-router.get('/businesses',             admin.getBusinesses);
-router.put('/businesses/:id/approve', admin.approveBusiness);
-router.put('/businesses/:id/reject',  admin.rejectBusiness);
-
-// Manual UPI billing — plan pricing, payment info, and activating a
+// Manual UPI billing â€” plan pricing, payment info, and activating a
 // business's paid plan once you've confirmed their UPI payment yourself.
 router.get('/plans',                          asyncWrap(billing.listPlansAdmin));
 router.patch('/plans/:slug',                  asyncWrap(billing.updatePlan));
@@ -38,7 +32,7 @@ router.get('/businesses/:id/detail',        asyncWrap(auditLog.getBusinessDetail
 router.get('/dashboard-stats',              asyncWrap(auditLog.getDashboardStats));
 router.get('/needs-attention',              asyncWrap(auditLog.getNeedsAttention));
 
-// Support Chats — pre-login Help & Support widget, admin side
+// Support Chats â€” pre-login Help & Support widget, admin side
 router.get('/support-chats',                   asyncWrap(supportChat.listChatsAdmin));
 router.get('/support-chats/:id',                asyncWrap(supportChat.getChatAdmin));
 router.post('/support-chats/:id/messages',      asyncWrap(supportChat.replyChatAdmin));

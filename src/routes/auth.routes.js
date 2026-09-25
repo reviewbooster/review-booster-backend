@@ -3,12 +3,12 @@
 /**
  * Auth routes
  *  -- 
- * POST /api/auth/signup          Ã¢â‚¬â€ public self-registration
- * POST /api/auth/register        Ã¢â‚¬â€ super_admin creates Business + User
- * POST /api/auth/login           Ã¢â‚¬â€ validates credentials, issues tokens
- * POST /api/auth/refresh         Ã¢â‚¬â€ rotates refresh token, new access token
- * POST /api/auth/logout          Ã¢â‚¬â€ clears refresh cookie
- * POST /api/auth/change-password Ã¢â‚¬â€ forced on first login
+ * POST /api/auth/signup          ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â public self-registration
+ * POST /api/auth/register        ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â super_admin creates Business + User
+ * POST /api/auth/login           ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â validates credentials, issues tokens
+ * POST /api/auth/refresh         ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â rotates refresh token, new access token
+ * POST /api/auth/logout          ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â clears refresh cookie
+ * POST /api/auth/change-password ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â forced on first login
  *  -- 
  */
 
@@ -84,7 +84,7 @@ const clearRefreshCookie = (res) => {
 };
 
 //  -- 
-// Rate limiter Ã¢â‚¬â€ 5 login attempts per 15 minutes per IP+email
+// Rate limiter ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â 5 login attempts per 15 minutes per IP+email
 // Applied only to POST /auth/login
 //  -- 
 
@@ -104,7 +104,7 @@ const loginLimiter = rateLimit({
 });
 
 //  -- 
-// Rate limiter Ã¢â‚¬â€ 5 signup attempts per hour per IP
+// Rate limiter ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â 5 signup attempts per hour per IP
 // Applied only to POST /auth/signup
 //  -- 
 
@@ -167,7 +167,7 @@ const signupSchema = Joi.object({
 //  -- 
 /**
  * Super-admin only. Creates a new Business + owner User in one operation.
- * google_review_url is required here Ã¢â‚¬â€ admin always sets it at registration.
+ * google_review_url is required here ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â admin always sets it at registration.
  */
 router.post(
   '/register',
@@ -199,7 +199,6 @@ router.post(
       google_review_url,
       plan:              'trial',
       trial_ends_at:     new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-      approval_status:   'approved',
       source:            'admin_created',
     });
 
@@ -232,8 +231,8 @@ router.post(
 /**
  * Public self-registration. Creates Business + owner User.
  * Rate-limited to 5 signups per hour per IP.
- * Sets must_change_password: false Ã¢â‚¬â€ user chose their own password.
- * google_review_url is optional Ã¢â‚¬â€ can be added later in Settings.
+ * Sets must_change_password: false ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â user chose their own password.
+ * google_review_url is optional ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â can be added later in Settings.
  */
 router.post(
   '/signup',
@@ -254,7 +253,7 @@ router.post(
 
     const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    // Engine B Ã¢â‚¬â€ resolve an incoming ?ref= code (if any) to the referring
+    // Engine B ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â resolve an incoming ?ref= code (if any) to the referring
     // business before creating this one, so it can be tagged at creation.
     let referringBusinessReferral = null;
     if (ref && ref.trim()) {
@@ -270,7 +269,6 @@ router.post(
       trial_ends_at:     new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
       referred_by_business_id: referringBusinessReferral ? referringBusinessReferral.business_id : null,
       source: 'self_signup',
-      approval_status: 'approved',
     });
 
     if (referringBusinessReferral) {
@@ -278,7 +276,7 @@ router.post(
         referral_id:           referringBusinessReferral._id,
         referrer_business_id:  referringBusinessReferral.business_id,
         new_business_id:       business._id,
-      }).catch(() => { /* duplicate-key race on the unique new_business_id Ã¢â‚¬â€ safe to ignore */ });
+      }).catch(() => { /* duplicate-key race on the unique new_business_id ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â safe to ignore */ });
     }
 
 
@@ -347,15 +345,9 @@ router.post(
 
     let onboardingCompleted = true;
     if (user.business_id) {
-      const business = await Business.findById(user.business_id).select('is_suspended approval_status onboarding_completed').lean();
+      const business = await Business.findById(user.business_id).select('is_suspended onboarding_completed').lean();
       if (business && business.is_suspended) {
         return res.status(403).json({ error: 'This account has been suspended. Contact support.' });
-      }
-      if (business && business.approval_status === 'pending') {
-        return res.status(403).json({ error: 'Your account is pending admin approval.', code: 'PENDING_APPROVAL' });
-      }
-      if (business && business.approval_status === 'rejected') {
-        return res.status(403).json({ error: 'Your account was not approved. Please contact support.', code: 'ACCOUNT_REJECTED' });
       }
       onboardingCompleted = business ? !!business.onboarding_completed : true;
     }
@@ -406,18 +398,10 @@ router.post(
 
     let onboardingCompleted = true;
     if (user.business_id) {
-      const business = await Business.findById(user.business_id).select('is_suspended approval_status onboarding_completed').lean();
+      const business = await Business.findById(user.business_id).select('is_suspended onboarding_completed').lean();
       if (business && business.is_suspended) {
         clearRefreshCookie(res);
         return res.status(403).json({ error: 'Account suspended.' });
-      }
-      if (business && business.approval_status === 'pending') {
-        clearRefreshCookie(res);
-        return res.status(403).json({ error: 'Account pending approval.', code: 'PENDING_APPROVAL' });
-      }
-      if (business && business.approval_status === 'rejected') {
-        clearRefreshCookie(res);
-        return res.status(403).json({ error: 'Account not approved.', code: 'ACCOUNT_REJECTED' });
       }
       onboardingCompleted = business ? !!business.onboarding_completed : true;
     }

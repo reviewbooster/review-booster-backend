@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const jwt      = require('jsonwebtoken');
 const Business = require('../models/Business');
@@ -47,16 +47,10 @@ const auth = async (req, res, next) => {
     // Suspension check -- only for business users, not super_admin
     if (req.user.business_id) {
       const business = await Business.findById(req.user.business_id)
-        .select('is_suspended approval_status')
+        .select('is_suspended')
         .lean();
       if (business && business.is_suspended) {
         return res.status(403).json({ error: 'Account suspended.' });
-      }
-      if (business && business.approval_status === 'pending') {
-        return res.status(403).json({ error: 'Account pending approval.', code: 'PENDING_APPROVAL' });
-      }
-      if (business && business.approval_status === 'rejected') {
-        return res.status(403).json({ error: 'Account not approved.', code: 'ACCOUNT_REJECTED' });
       }
     }
 

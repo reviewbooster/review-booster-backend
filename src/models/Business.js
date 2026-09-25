@@ -23,7 +23,7 @@ const BusinessSchema = new Schema(
         message: '{VALUE} is not a supported business type',
       },
     },
-    // Only used when type === 'other' â€” the owner's own typed-in category,
+    // Only used when type === 'other' Ã¢â‚¬â€ the owner's own typed-in category,
     // e.g. "Photography Studio". Shown in place of a generic label.
     type_other: {
       type: String,
@@ -55,7 +55,7 @@ const BusinessSchema = new Schema(
       type: Date,
       default: null,
     },
-    // Engine B â€” set once, at signup, if this business came in through
+    // Engine B Ã¢â‚¬â€ set once, at signup, if this business came in through
     // another business's referral link. Points at the referring
     // Business's own _id (not a code) for easy lookups.
     referred_by_business_id: {
@@ -64,13 +64,13 @@ const BusinessSchema = new Schema(
       default: null,
     },
     // True once this business's one-time Engine B signup discount has
-    // been shown/used on an activate-plan â€” prevents it re-applying on
+    // been shown/used on an activate-plan Ã¢â‚¬â€ prevents it re-applying on
     // every future renewal.
     referral_discount_used: {
       type: Boolean,
       default: false,
     },
-    // How this business joined the platform â€” set once at creation.
+    // How this business joined the platform Ã¢â‚¬â€ set once at creation.
     // 'self_signup' = came through the public /signup form (may also
     // have referred_by_business_id set, if it came via an Engine B link).
     // 'admin_created' = a super_admin created the account directly.
@@ -98,16 +98,32 @@ const BusinessSchema = new Schema(
       type: Boolean,
       default: false,
     },
-    approval_status: {
-      type:    String,
-      enum:    ['pending', 'approved', 'rejected'],
-      default: 'pending',
-    },
     // Set true once this business finishes (or skips) the post-signup
     // onboarding wizard. Persisted server-side rather than in
     // localStorage so it stays correct even if they switch devices or
     // clear their browser -- this must show exactly once, ever.
     onboarding_completed: {
+      type: Boolean,
+      default: false,
+    },
+    // Product Adoption layer -- deliberately separate from
+    // onboarding_completed above. Onboarding finishes business *setup*;
+    // these track whether the owner has seen the post-setup product
+    // introduction and walkthrough. Different lifecycle concept, different
+    // fields, so one is never accidentally reused for the other.
+    product_intro_seen: {
+      type: Boolean,
+      default: false,
+    },
+    product_tour_completed: {
+      type: Boolean,
+      default: false,
+    },
+    product_tour_started: {
+      type: Boolean,
+      default: false,
+    },
+    tour_skipped: {
       type: Boolean,
       default: false,
     },
@@ -119,7 +135,7 @@ const BusinessSchema = new Schema(
     },
     /**
      * Owner-editable wording for outgoing customer messages. Null means
-     * "use the built-in default text" â€” lets every business start with a
+     * "use the built-in default text" Ã¢â‚¬â€ lets every business start with a
      * sensible message without forcing them to configure anything.
      * Supports {{name}}, {{link}}, {{rating}} placeholders, substituted
      * at send time.
@@ -135,10 +151,9 @@ const BusinessSchema = new Schema(
   }
 );
 
-// No business_id here â€” this IS the root tenant. No compound index needed.
+// No business_id here Ã¢â‚¬â€ this IS the root tenant. No compound index needed.
 // We do want fast lookups by plan for admin dashboards.
 BusinessSchema.index({ plan: 1 });
 BusinessSchema.index({ is_suspended: 1 });
-BusinessSchema.index({ approval_status: 1 });
 
 module.exports = mongoose.model('Business', BusinessSchema);

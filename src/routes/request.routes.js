@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const express   = require('express');
 const router    = express.Router();
@@ -11,7 +11,7 @@ const { sendRequest, listRequests } = require('../controllers/request.controller
 
 router.use(auth);
 
-router.post('/', roleGuard('owner'),           validate(sendRequestSchema),       asyncWrap(sendRequest));
-router.get('/',  roleGuard('owner', 'staff'),  validateQuery(listRequestsSchema), asyncWrap(listRequests));
+router.post('/', roleGuard('owner', 'staff'), validate(sendRequestSchema),       asyncWrap(sendRequest));
+router.get('/',  roleGuard('owner', 'staff'), validateQuery(listRequestsSchema), asyncWrap(listRequests));
 
 module.exports = router;
