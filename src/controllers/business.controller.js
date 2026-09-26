@@ -179,7 +179,7 @@ const getMySettings = async (req, res) => {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
   const business = await Business.findById(req.user.business_id)
-    .select('name type type_other google_review_url whatsapp_consent_required plan trial_ends_at brand_logo_url created_at message_templates onboarding_completed product_intro_seen product_tour_completed product_tour_started tour_skipped')
+    .select('name type type_other google_review_url whatsapp_consent_required plan trial_ends_at brand_logo_url created_at message_templates onboarding_completed product_intro_seen product_tour_completed product_tour_started tour_skipped product_features_seen')
     .lean();
   if (!business) {
     return res.status(404).json({ error: 'Business not found.' });
@@ -287,6 +287,27 @@ const updateMySettings = async (req, res) => {
     product_tour_started: business.product_tour_started,
     tour_skipped: business.tour_skipped,
   } });
+};
+
+// PATCH /api/business/my-settings/feature-seen - authenticated (owner OR staff);
+// marks one product-feature key (e.g. 'dive_qr', 'info_growth') as seen for
+// this business, idempotently. Deliberately its own endpoint rather than
+// folded into updateMySettings above, since that one is owner-only and this
+// needs to work for staff logins too -- it is product-adoption tracking,
+// not a business setting.
+const markFeatureSeen = async (req, res) => {
+  if (!req.user.business_id) {
+    return res.status(403).json({ error: 'No business associated with this account.' });
+  }
+  const { key } = req.body;
+  if (!key || typeof key !== 'string') {
+    return res.status(400).json({ error: 'A feature key is required.' });
+  }
+  await Business.updateOne(
+    { _id: req.user.business_id },
+    { $addToSet: { product_features_seen: key } }
+  );
+  res.json({ data: { key } });
 };
 
 // POST /api/business/my-logo - authenticated owner endpoint, uploads to Cloudinary
@@ -408,4 +429,4 @@ const deleteStaff = async (req, res) => {
   res.json({ data: { message: 'Staff account removed.' } });
 };
 
-module.exports = { listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff };
+module.exports = { listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff };

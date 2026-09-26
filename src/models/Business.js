@@ -127,6 +127,15 @@ const BusinessSchema = new Schema(
       type: Boolean,
       default: false,
     },
+    // Per-feature "seen" flags for the individual spotlight deep dives and
+    // info popups sprinkled through the dashboard (e.g. 'dive_qr',
+    // 'info_growth'). Server-side and business-scoped -- like
+    // product_intro_seen above -- so each one shows exactly once per
+    // business, no matter which device or browser it's opened from.
+    product_features_seen: {
+      type: [String],
+      default: [],
+    },
     qr_token: {
       type:    String,
       unique:  true,
