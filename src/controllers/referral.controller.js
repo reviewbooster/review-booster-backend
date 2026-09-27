@@ -385,6 +385,16 @@ const getCustomerReferral = async (req, res) => {
   if (!business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
+  if (req.user.role !== 'super_admin') {
+    const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
+    const myEffectivePlan = getEffectivePlanSlug(myBusiness);
+    if (!(await canUseFeature(myEffectivePlan, 'engine_a'))) {
+      const msg = myEffectivePlan === 'expired'
+        ? 'Your plan has expired \u2014 renew to keep using this.'
+        : 'Customer referrals aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
+      return res.status(403).json({ error: msg });
+    }
+  }
   const customer = await Customer.findOne({ _id: req.params.customer_id, business_id }).select('_id');
   if (!customer) {
     return res.status(404).json({ error: 'Customer not found.' });
