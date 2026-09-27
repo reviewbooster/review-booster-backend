@@ -50,11 +50,14 @@ const PlanSchema = new Schema(
      * changes in behavior until an admin explicitly edits and saves here.
      */
     limits: {
-      customers: { type: Number, default: null, min: 0 },
-      staff:     { type: Number, default: null, min: 0 },
-      ai_reply:  { type: Boolean, default: false },
-      engine_a:  { type: Boolean, default: false },
-      engine_b:  { type: Boolean, default: false },
+      customers:        { type: Number, default: null, min: 0 },
+      staff:            { type: Number, default: null, min: 0 },
+      ai_reply:         { type: Boolean, default: false },
+      engine_a:         { type: Boolean, default: false },
+      engine_b:         { type: Boolean, default: false },
+      win_back:         { type: Boolean, default: false },
+      analytics:        { type: Boolean, default: false },
+      custom_templates: { type: Boolean, default: false },
     },
   },
   {

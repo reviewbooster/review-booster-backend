@@ -11,7 +11,7 @@ const Plan                    = require('../models/Plan');
 const PlatformBillingSettings = require('../models/PlatformBillingSettings');
 const BusinessReferralSettings = require('../models/BusinessReferralSettings');
 const { logAction } = require('./auditLog.controller');
-const { clearPlanLimitsCache } = require('../utils/planLimits');
+const { clearPlanLimitsCache, FEATURE_LABELS } = require('../utils/planLimits');
 
 const PLAN_DEFAULTS = {
   trial:   { name: 'Trial',   sort: 0 },
@@ -23,6 +23,17 @@ const PLAN_DEFAULTS = {
   // business's trial or paid plan lapses.
   expired: { name: 'Expired', sort: 4 },
 };
+
+// Builds the feature list shown to business owners straight from what's
+// ticked in a plan's limits -- checked boxes first, then whatever extra
+// marketing lines the admin typed in free text. Keeps the two in sync
+// automatically instead of requiring the admin to type out ticked features
+// by hand.
+function mergePlanFeatures(plan) {
+  const limits = (plan && plan.limits) || {};
+  const autoLines = Object.keys(FEATURE_LABELS).filter((key) => limits[key]).map((key) => FEATURE_LABELS[key]);
+  return autoLines.concat((plan && plan.features) || []);
+}
 
 // Ensures all three plan docs exist (lazy-created with a $0 placeholder
 // price the first time anyone asks), so the admin screen always has
@@ -66,7 +77,12 @@ async function getOrDefaultPlatformSettings() {
 // "plan" entry in the admin Billing Settings screen.
 const getPlans = async (req, res) => {
   const all = await getOrCreateAllPlans();
-  const active = all.filter((p) => p.is_active && p.slug !== 'trial' && p.slug !== 'expired');
+  const active = all
+    .filter((p) => p.is_active && p.slug !== 'trial' && p.slug !== 'expired')
+    .map((p) => {
+      const obj = p.toObject ? p.toObject() : p;
+      return Object.assign({}, obj, { features: mergePlanFeatures(obj) });
+    });
   res.json({ data: active });
 };
 
@@ -125,7 +141,7 @@ const getPaymentInfo = async (req, res) => {
 
   res.json({
     data: {
-      plan: { slug: plan.slug, name: plan.name, price_monthly: displayPrice, original_price_monthly: plan.price_monthly, features: plan.features },
+      plan: { slug: plan.slug, name: plan.name, price_monthly: displayPrice, original_price_monthly: plan.price_monthly, features: mergePlanFeatures(plan) },
       referral_discount_applied,
       upi_id: settings.upi_id,
       upi_payee_name: settings.upi_payee_name,
@@ -181,6 +197,9 @@ const updatePlan = async (req, res) => {
     update['limits.ai_reply']  = !!limits.ai_reply;
     update['limits.engine_a']  = !!limits.engine_a;
     update['limits.engine_b']  = !!limits.engine_b;
+    update['limits.win_back']         = !!limits.win_back;
+    update['limits.analytics']        = !!limits.analytics;
+    update['limits.custom_templates'] = !!limits.custom_templates;
   }
 
   await getOrCreateAllPlans(); // ensure the doc exists before updating

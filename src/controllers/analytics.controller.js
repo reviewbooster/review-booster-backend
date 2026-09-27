@@ -9,7 +9,9 @@
  */
 const Review        = require('../models/Review');
 const ReviewRequest = require('../models/ReviewRequest');
+const Business      = require('../models/Business');
 const mongoose      = require('mongoose');
+const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
@@ -152,6 +154,19 @@ const getSummary = async (req, res) => {
 // GET /api/analytics/reviews-over-time?days=N  OR  ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
 const getReviewsOverTime = async (req, res) => {
   const filter = tenantFilter(req.user);
+
+  // The deeper trend chart is the "Analytics" paid feature -- the basic
+  // summary stats above (shared with the Dashboard) stay free regardless.
+  if (req.user.role !== 'super_admin') {
+    const myBusiness = await Business.findById(req.user.business_id).select('plan trial_ends_at plan_expires_at').lean();
+    const myEffectivePlan = getEffectivePlanSlug(myBusiness);
+    if (!(await canUseFeature(myEffectivePlan, 'analytics'))) {
+      const msg = myEffectivePlan === 'expired'
+        ? 'Your plan has expired \u2014 renew to keep using this.'
+        : 'Advanced analytics isn\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
+      return res.status(403).json({ error: msg });
+    }
+  }
 
   let days, endDate;
   if (req.query.start_date && req.query.end_date) {

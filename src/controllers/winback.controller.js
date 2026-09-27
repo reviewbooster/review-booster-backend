@@ -14,6 +14,7 @@ const ReviewRequest     = require('../models/ReviewRequest');
 const WinBackSettings   = require('../models/WinBackSettings');
 const Business          = require('../models/Business');
 const { getWinBackDefaults } = require('../utils/winbackDefaults');
+const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 
 async function getOrDefaultSettings(business_id) {
   const existing = await WinBackSettings.findOne({ business_id }).lean();
@@ -95,6 +96,16 @@ const getDueCustomers = async (req, res) => {
   if (!business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
+  if (req.user.role !== 'super_admin') {
+    const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
+    const myEffectivePlan = getEffectivePlanSlug(myBusiness);
+    if (!(await canUseFeature(myEffectivePlan, 'win_back'))) {
+      const msg = myEffectivePlan === 'expired'
+        ? 'Your plan has expired \u2014 renew to keep using this.'
+        : 'Win-Back isn\u2019t available on your current plan. Upgrade to use this.';
+      return res.status(403).json({ error: msg });
+    }
+  }
   const settings = await getOrDefaultSettings(business_id);
   if (!settings.enabled) {
     return res.json({ data: [], summary: { due_count: 0, returned_count: 0 }, settings });
@@ -170,6 +181,16 @@ const markSent = async (req, res) => {
   const business_id = req.user.business_id;
   if (!business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
+  }
+  if (req.user.role !== 'super_admin') {
+    const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
+    const myEffectivePlan = getEffectivePlanSlug(myBusiness);
+    if (!(await canUseFeature(myEffectivePlan, 'win_back'))) {
+      const msg = myEffectivePlan === 'expired'
+        ? 'Your plan has expired \u2014 renew to keep using this.'
+        : 'Win-Back isn\u2019t available on your current plan. Upgrade to use this.';
+      return res.status(403).json({ error: msg });
+    }
   }
   const { customerId } = req.params;
 

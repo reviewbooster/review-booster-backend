@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 /**
  * business.controller.js
  * Super-admin: list, delete businesses, reset passwords.
@@ -14,7 +14,7 @@ const ReviewRequest = require('../models/ReviewRequest');
 const Review        = require('../models/Review');
 const Alert         = require('../models/Alert');
 const { logAction } = require('./auditLog.controller');
-const { getPlanLimits } = require('../utils/planLimits');
+const { getPlanLimits, canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 
 // GET /api/business
 const listBusinesses = async (req, res) => {
@@ -237,6 +237,15 @@ const updateMySettings = async (req, res) => {
   }
 
   if (message_templates !== undefined) {
+    if (req.user.role !== 'super_admin') {
+      const myEffectivePlan = getEffectivePlanSlug(business);
+      if (!(await canUseFeature(myEffectivePlan, 'custom_templates'))) {
+        const msg = myEffectivePlan === 'expired'
+          ? 'Your plan has expired \u2014 renew to keep customizing message templates.'
+          : 'Custom message templates aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
+        return res.status(403).json({ error: msg });
+      }
+    }
     var mt = message_templates || {};
     if (mt.review_request !== undefined) {
       business.message_templates.review_request = (mt.review_request || '').trim() || null;

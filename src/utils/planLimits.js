@@ -15,13 +15,13 @@
 const Plan = require('../models/Plan');
 
 const PLAN_LIMITS = {
-  trial:   { customers: 200,      staff: 0, ai_reply: false, engine_a: false, engine_b: false },
-  basic:   { customers: 200,      staff: 0, ai_reply: false, engine_a: false, engine_b: false },
-  pro:     { customers: 1000,     staff: 3, ai_reply: true,  engine_a: true,  engine_b: false },
-  agency:  { customers: Infinity, staff: Infinity, ai_reply: true, engine_a: true, engine_b: true },
+  trial:   { customers: 200,      staff: 0, ai_reply: false, engine_a: false, engine_b: false, win_back: false, analytics: false, custom_templates: false },
+  basic:   { customers: 200,      staff: 0, ai_reply: false, engine_a: false, engine_b: false, win_back: false, analytics: false, custom_templates: false },
+  pro:     { customers: 1000,     staff: 3, ai_reply: true,  engine_a: true,  engine_b: false, win_back: true,  analytics: true,  custom_templates: true },
+  agency:  { customers: Infinity, staff: Infinity, ai_reply: true, engine_a: true, engine_b: true, win_back: true, analytics: true, custom_templates: true },
   // A lapsed trial/paid plan falls back to this until the admin's own
   // Expired-tier settings (edited on the same Plans page) override it.
-  expired: { customers: 0,        staff: 0, ai_reply: false, engine_a: false, engine_b: false },
+  expired: { customers: 0,        staff: 0, ai_reply: false, engine_a: false, engine_b: false, win_back: false, analytics: false, custom_templates: false },
 };
 
 const CACHE_TTL_MS = 60 * 1000;
@@ -36,17 +36,23 @@ function hasCustomLimits(limits) {
     limits.staff == null &&
     !limits.ai_reply &&
     !limits.engine_a &&
-    !limits.engine_b
+    !limits.engine_b &&
+    !limits.win_back &&
+    !limits.analytics &&
+    !limits.custom_templates
   );
 }
 
 function normalize(limits) {
   return {
-    customers: limits.customers == null ? Infinity : limits.customers,
-    staff:     limits.staff == null ? Infinity : limits.staff,
-    ai_reply:  !!limits.ai_reply,
-    engine_a:  !!limits.engine_a,
-    engine_b:  !!limits.engine_b,
+    customers:        limits.customers == null ? Infinity : limits.customers,
+    staff:            limits.staff == null ? Infinity : limits.staff,
+    ai_reply:         !!limits.ai_reply,
+    engine_a:         !!limits.engine_a,
+    engine_b:         !!limits.engine_b,
+    win_back:         !!limits.win_back,
+    analytics:        !!limits.analytics,
+    custom_templates: !!limits.custom_templates,
   };
 }
 
@@ -98,8 +104,21 @@ function getEffectivePlanSlug(business) {
   return business.plan;
 }
 
+// Human-readable line for each boolean feature flag, in display order --
+// shared by getPlans/getPaymentInfo (billing.controller.js) to build the
+// feature list shown to business owners straight from what's ticked here,
+// rather than needing it typed out separately.
+const FEATURE_LABELS = {
+  ai_reply:         'AI Reply Drafts',
+  engine_a:         'Customer Referrals',
+  engine_b:         'Refer a Business',
+  win_back:         'Win-Back Campaigns',
+  analytics:        'Advanced Analytics',
+  custom_templates: 'Custom Message Templates',
+};
+
 function clearPlanLimitsCache() {
   cache.clear();
 }
 
-module.exports = { PLAN_LIMITS, getPlanLimits, canUseFeature, getEffectivePlanSlug, clearPlanLimitsCache };
+module.exports = { PLAN_LIMITS, FEATURE_LABELS, getPlanLimits, canUseFeature, getEffectivePlanSlug, clearPlanLimitsCache };
