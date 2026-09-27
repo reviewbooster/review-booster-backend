@@ -196,9 +196,13 @@ const generateReplyForReview = async (req, res) => {
   if (!review) return res.status(404).json({ error: 'Review not found.' });
 
   const business = await Business.findById(review.business_id).select('name plan trial_ends_at plan_expires_at').lean();
+  const effectivePlan = getEffectivePlanSlug(business);
 
-  if (req.user.role !== 'super_admin' && !(await canUseFeature(getEffectivePlanSlug(business), 'ai_reply'))) {
-    return res.status(403).json({ error: 'AI reply drafts aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.' });
+  if (req.user.role !== 'super_admin' && !(await canUseFeature(effectivePlan, 'ai_reply'))) {
+    const msg = effectivePlan === 'expired'
+      ? 'Your plan has expired \u2014 renew to keep using this.'
+      : 'AI reply drafts aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
+    return res.status(403).json({ error: msg });
   }
 
   const { template } = req.body || {};

@@ -58,8 +58,12 @@ const getMyCode = async (req, res) => {
   }
   if (req.user.role !== 'super_admin') {
     const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
-    if (!(await canUseFeature(getEffectivePlanSlug(myBusiness), 'engine_b'))) {
-      return res.status(403).json({ error: 'Referring other businesses isn\u2019t available on your current plan. Upgrade to Agency to use this.' });
+    const myEffectivePlan = getEffectivePlanSlug(myBusiness);
+    if (!(await canUseFeature(myEffectivePlan, 'engine_b'))) {
+      const msg = myEffectivePlan === 'expired'
+        ? 'Your plan has expired \u2014 renew to keep using this.'
+        : 'Referring other businesses isn\u2019t available on your current plan. Upgrade to Agency to use this.';
+      return res.status(403).json({ error: msg });
     }
   }
   const referral = await findOrCreateBusinessReferral(business_id);
@@ -74,8 +78,12 @@ const getMyStats = async (req, res) => {
   }
   if (req.user.role !== 'super_admin') {
     const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
-    if (!(await canUseFeature(getEffectivePlanSlug(myBusiness), 'engine_b'))) {
-      return res.status(403).json({ error: 'Referring other businesses isn\u2019t available on your current plan. Upgrade to Agency to use this.' });
+    const myEffectivePlan = getEffectivePlanSlug(myBusiness);
+    if (!(await canUseFeature(myEffectivePlan, 'engine_b'))) {
+      const msg = myEffectivePlan === 'expired'
+        ? 'Your plan has expired \u2014 renew to keep using this.'
+        : 'Referring other businesses isn\u2019t available on your current plan. Upgrade to Agency to use this.';
+      return res.status(403).json({ error: msg });
     }
   }
   const referral = await findOrCreateBusinessReferral(business_id);

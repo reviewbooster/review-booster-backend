@@ -254,8 +254,12 @@ const redeemReferral = async (req, res) => {
 
   if (req.user.role !== 'super_admin') {
     const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
-    if (!(await canUseFeature(getEffectivePlanSlug(myBusiness), 'engine_a'))) {
-      return res.status(403).json({ error: 'Customer referrals aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.' });
+    const myEffectivePlan = getEffectivePlanSlug(myBusiness);
+    if (!(await canUseFeature(myEffectivePlan, 'engine_a'))) {
+      const msg = myEffectivePlan === 'expired'
+        ? 'Your plan has expired \u2014 renew to keep using this.'
+        : 'Customer referrals aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
+      return res.status(403).json({ error: msg });
     }
   }
 
