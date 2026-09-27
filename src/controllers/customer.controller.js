@@ -11,7 +11,7 @@ const ReviewRequest   = require('../models/ReviewRequest');
 const Review          = require('../models/Review');
 const Business        = require('../models/Business');
 const FollowUp        = require('../models/FollowUp');
-const { getPlanLimits } = require('../utils/planLimits');
+const { getPlanLimits, getEffectivePlanSlug } = require('../utils/planLimits');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
@@ -88,8 +88,8 @@ const createCustomer = async (req, res) => {
   const filter = tenantFilter(req.user);
 
   if (req.user.role !== 'super_admin') {
-    const business = await Business.findById(req.user.business_id).select('plan').lean();
-    const limits = await getPlanLimits(business?.plan);
+    const business = await Business.findById(req.user.business_id).select('plan trial_ends_at plan_expires_at').lean();
+    const limits = await getPlanLimits(getEffectivePlanSlug(business));
     const currentCount = await Customer.countDocuments(filter);
     if (currentCount >= limits.customers) {
       return res.status(403).json({ error: 'You\u2019ve reached your plan\u2019s customer limit (' + limits.customers + '). Upgrade your plan to add more.' });

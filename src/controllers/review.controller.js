@@ -11,7 +11,7 @@ const Business = require('../models/Business');
 const Customer = require('../models/Customer');
 const { generateReply } = require('../utils/replyTemplates');
 const { buildBrandedCsv, sendBrandedPdf } = require('../utils/exportBranding');
-const { canUseFeature } = require('../utils/planLimits');
+const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
@@ -195,9 +195,9 @@ const generateReplyForReview = async (req, res) => {
 
   if (!review) return res.status(404).json({ error: 'Review not found.' });
 
-  const business = await Business.findById(review.business_id).select('name plan').lean();
+  const business = await Business.findById(review.business_id).select('name plan trial_ends_at plan_expires_at').lean();
 
-  if (req.user.role !== 'super_admin' && !(await canUseFeature(business?.plan, 'ai_reply'))) {
+  if (req.user.role !== 'super_admin' && !(await canUseFeature(getEffectivePlanSlug(business), 'ai_reply'))) {
     return res.status(403).json({ error: 'AI reply drafts aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.' });
   }
 

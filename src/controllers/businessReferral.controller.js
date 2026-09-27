@@ -12,7 +12,7 @@ const BusinessReferral        = require('../models/BusinessReferral');
 const BusinessReferralSignup  = require('../models/BusinessReferralSignup');
 const BusinessReferralSettings = require('../models/BusinessReferralSettings');
 const { logAction } = require('./auditLog.controller');
-const { canUseFeature } = require('../utils/planLimits');
+const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 function generateShortCode() {
@@ -57,8 +57,8 @@ const getMyCode = async (req, res) => {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
   if (req.user.role !== 'super_admin') {
-    const myBusiness = await Business.findById(business_id).select('plan').lean();
-    if (!(await canUseFeature(myBusiness?.plan, 'engine_b'))) {
+    const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
+    if (!(await canUseFeature(getEffectivePlanSlug(myBusiness), 'engine_b'))) {
       return res.status(403).json({ error: 'Referring other businesses isn\u2019t available on your current plan. Upgrade to Agency to use this.' });
     }
   }
@@ -73,8 +73,8 @@ const getMyStats = async (req, res) => {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
   if (req.user.role !== 'super_admin') {
-    const myBusiness = await Business.findById(business_id).select('plan').lean();
-    if (!(await canUseFeature(myBusiness?.plan, 'engine_b'))) {
+    const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
+    if (!(await canUseFeature(getEffectivePlanSlug(myBusiness), 'engine_b'))) {
       return res.status(403).json({ error: 'Referring other businesses isn\u2019t available on your current plan. Upgrade to Agency to use this.' });
     }
   }

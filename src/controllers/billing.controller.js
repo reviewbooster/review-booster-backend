@@ -14,10 +14,14 @@ const { logAction } = require('./auditLog.controller');
 const { clearPlanLimitsCache } = require('../utils/planLimits');
 
 const PLAN_DEFAULTS = {
-  trial:  { name: 'Trial',  sort: 0 },
-  basic:  { name: 'Basic',  sort: 1 },
-  pro:    { name: 'Pro',    sort: 2 },
-  agency: { name: 'Agency', sort: 3 },
+  trial:   { name: 'Trial',   sort: 0 },
+  basic:   { name: 'Basic',   sort: 1 },
+  pro:     { name: 'Pro',     sort: 2 },
+  agency:  { name: 'Agency',  sort: 3 },
+  // Not a real subscribable tier -- excluded from the customer-facing
+  // purchasable list below. It's the feature set enforced the moment a
+  // business's trial or paid plan lapses.
+  expired: { name: 'Expired', sort: 4 },
 };
 
 // Ensures all three plan docs exist (lazy-created with a $0 placeholder
@@ -62,7 +66,7 @@ async function getOrDefaultPlatformSettings() {
 // "plan" entry in the admin Billing Settings screen.
 const getPlans = async (req, res) => {
   const all = await getOrCreateAllPlans();
-  const active = all.filter((p) => p.is_active && p.slug !== 'trial');
+  const active = all.filter((p) => p.is_active && p.slug !== 'trial' && p.slug !== 'expired');
   res.json({ data: active });
 };
 
@@ -86,7 +90,7 @@ const getMyBillingStatus = async (req, res) => {
 // UPI deep link with the amount pre-filled.
 const getPaymentInfo = async (req, res) => {
   const slug = req.query.plan;
-  if (!PLAN_DEFAULTS[slug]) {
+  if (!PLAN_DEFAULTS[slug] || slug === 'expired') {
     return res.status(400).json({ error: 'Unknown plan.' });
   }
   const all = await getOrCreateAllPlans();

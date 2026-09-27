@@ -15,10 +15,13 @@
 const Plan = require('../models/Plan');
 
 const PLAN_LIMITS = {
-  trial:  { customers: 200,      staff: 0, ai_reply: false, engine_a: false, engine_b: false },
-  basic:  { customers: 200,      staff: 0, ai_reply: false, engine_a: false, engine_b: false },
-  pro:    { customers: 1000,     staff: 3, ai_reply: true,  engine_a: true,  engine_b: false },
-  agency: { customers: Infinity, staff: Infinity, ai_reply: true, engine_a: true, engine_b: true },
+  trial:   { customers: 200,      staff: 0, ai_reply: false, engine_a: false, engine_b: false },
+  basic:   { customers: 200,      staff: 0, ai_reply: false, engine_a: false, engine_b: false },
+  pro:     { customers: 1000,     staff: 3, ai_reply: true,  engine_a: true,  engine_b: false },
+  agency:  { customers: Infinity, staff: Infinity, ai_reply: true, engine_a: true, engine_b: true },
+  // A lapsed trial/paid plan falls back to this until the admin's own
+  // Expired-tier settings (edited on the same Plans page) override it.
+  expired: { customers: 0,        staff: 0, ai_reply: false, engine_a: false, engine_b: false },
 };
 
 const CACHE_TTL_MS = 60 * 1000;
@@ -72,8 +75,31 @@ async function canUseFeature(plan, feature) {
   return !!limits[feature];
 }
 
+/**
+ * Given a business doc with plan / trial_ends_at / plan_expires_at selected,
+ * returns the plan slug to use for feature/limit checks: the business's
+ * real plan, unless their trial or paid-plan window has actually lapsed --
+ * in which case 'expired'. Computed live on every check (not a cron-driven
+ * flag), so it's always accurate without ever needing to suspend the
+ * account to enforce it.
+ */
+function getEffectivePlanSlug(business) {
+  if (!business) return 'trial';
+  const now = Date.now();
+  if (business.plan === 'trial') {
+    if (business.trial_ends_at && new Date(business.trial_ends_at).getTime() < now) {
+      return 'expired';
+    }
+    return 'trial';
+  }
+  if (business.plan_expires_at && new Date(business.plan_expires_at).getTime() < now) {
+    return 'expired';
+  }
+  return business.plan;
+}
+
 function clearPlanLimitsCache() {
   cache.clear();
 }
 
-module.exports = { PLAN_LIMITS, getPlanLimits, canUseFeature, clearPlanLimitsCache };
+module.exports = { PLAN_LIMITS, getPlanLimits, canUseFeature, getEffectivePlanSlug, clearPlanLimitsCache };

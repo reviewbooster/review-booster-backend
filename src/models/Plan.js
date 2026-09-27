@@ -19,7 +19,10 @@ const PlanSchema = new Schema(
       type: String,
       required: true,
       unique: true,
-      enum: ['trial', 'basic', 'pro', 'agency'],
+      // 'expired' isn't a real subscribable tier -- it's the feature set a
+      // business falls back to the moment its trial or paid plan lapses.
+      // Configurable on the same admin Plans page as everything else.
+      enum: ['trial', 'basic', 'pro', 'agency', 'expired'],
     },
     name: {
       type: String,

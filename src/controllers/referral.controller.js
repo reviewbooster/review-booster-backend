@@ -18,7 +18,7 @@ const Referral         = require('../models/Referral');
 const ReferralSignup   = require('../models/ReferralSignup');
 const ReferralSettings = require('../models/ReferralSettings');
 const Business         = require('../models/Business');
-const { canUseFeature } = require('../utils/planLimits');
+const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 
@@ -253,8 +253,8 @@ const redeemReferral = async (req, res) => {
   }
 
   if (req.user.role !== 'super_admin') {
-    const myBusiness = await Business.findById(business_id).select('plan').lean();
-    if (!(await canUseFeature(myBusiness?.plan, 'engine_a'))) {
+    const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
+    if (!(await canUseFeature(getEffectivePlanSlug(myBusiness), 'engine_a'))) {
       return res.status(403).json({ error: 'Customer referrals aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.' });
     }
   }
