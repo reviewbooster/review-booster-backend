@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const mongoose = require('mongoose');
 
@@ -36,11 +36,18 @@ const BusinessSchema = new Schema(
       default: null,
       trim: true,
     },
+    // Trial-Free rework: every business's `plan` is always one of the four
+    // real, permanent tiers -- 'trial'/'agency' are legacy values kept only
+    // for any business not yet migrated (see migrate-plans-to-new-tiers.js
+    // at the repo root). New signups default straight to 'free'; the
+    // 14-day trial_ends_at window below grants Growth-level access on top
+    // of that (see getEffectivePlanSlug in utils/planLimits.js) without
+    // the stored plan itself ever needing to say "trial".
     plan: {
       type: String,
       required: true,
-      enum: ['trial', 'basic', 'pro', 'agency'],
-      default: 'trial',
+      enum: ['trial', 'basic', 'pro', 'agency', 'free', 'starter', 'growth'],
+      default: 'free',
     },
     trial_ends_at: {
       type: Date,

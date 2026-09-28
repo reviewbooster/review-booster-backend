@@ -24,6 +24,7 @@ const User     = require('../models/User');
 const Business = require('../models/Business');
 const BusinessReferral = require('../models/BusinessReferral');
 const BusinessReferralSignup = require('../models/BusinessReferralSignup');
+const PlatformBillingSettings = require('../models/PlatformBillingSettings');
 const auth     = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
 const { asyncWrap } = require('../middleware/errorHandler');
@@ -192,13 +193,16 @@ router.post(
 
     const password_hash = await bcrypt.hash(owner_password, BCRYPT_ROUNDS);
 
+    const billingCfg = await PlatformBillingSettings.findOne({}).select('trial_days').lean();
+    const trialDays = (billingCfg && billingCfg.trial_days) || 14;
+
     const business = await Business.create({
       name:              business_name,
       type:              business_type,
       type_other:        business_type === 'other' ? business_type_other : null,
       google_review_url,
-      plan:              'trial',
-      trial_ends_at:     new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      plan:              'free',
+      trial_ends_at:     new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
       source:            'admin_created',
     });
 
@@ -260,13 +264,16 @@ router.post(
       referringBusinessReferral = await BusinessReferral.findOne({ code: ref.trim().toUpperCase() });
     }
 
+    const billingCfg = await PlatformBillingSettings.findOne({}).select('trial_days').lean();
+    const trialDays = (billingCfg && billingCfg.trial_days) || 14;
+
     const business = await Business.create({
       name:              business_name,
       type:              business_type,
       type_other:        business_type === 'other' ? business_type_other : null,
       google_review_url: google_review_url || null,
-      plan:              'trial',
-      trial_ends_at:     new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      plan:              'free',
+      trial_ends_at:     new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
       referred_by_business_id: referringBusinessReferral ? referringBusinessReferral.business_id : null,
       source: 'self_signup',
     });

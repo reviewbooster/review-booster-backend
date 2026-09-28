@@ -33,6 +33,19 @@ const PlatformBillingSettingsSchema = new Schema(
       maxlength: 500,
       default: null,
     },
+    // Free trial given to every new signup. Both editable by the super admin.
+    trial_days: {
+      type: Number,
+      min: 1,
+      max: 90,
+      default: 14,
+    },
+    // Which plan's features and quotas the trial grants access to.
+    trial_plan: {
+      type: String,
+      enum: ['starter', 'growth', 'pro'],
+      default: 'growth',
+    },
   },
   {
     timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },

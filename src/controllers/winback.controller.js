@@ -14,7 +14,8 @@ const ReviewRequest     = require('../models/ReviewRequest');
 const WinBackSettings   = require('../models/WinBackSettings');
 const Business          = require('../models/Business');
 const { getWinBackDefaults } = require('../utils/winbackDefaults');
-const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
+const { canUseFeature, getEffectivePlanSlug, getPlanLimits } = require('../utils/planLimits');
+const { getUsageCount, recordUsage } = require('../utils/usageMeter');
 
 async function getOrDefaultSettings(business_id) {
   const existing = await WinBackSettings.findOne({ business_id }).lean();
@@ -185,11 +186,16 @@ const markSent = async (req, res) => {
   if (req.user.role !== 'super_admin') {
     const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
     const myEffectivePlan = getEffectivePlanSlug(myBusiness);
-    if (!(await canUseFeature(myEffectivePlan, 'win_back'))) {
+    const limits = await getPlanLimits(myEffectivePlan);
+    if (!limits.win_back) {
       const msg = myEffectivePlan === 'expired'
         ? 'Your plan has expired \u2014 renew to keep using this.'
         : 'Win-Back isn\u2019t available on your current plan. Upgrade to use this.';
       return res.status(403).json({ error: msg });
+    }
+    const usedThisMonth = await getUsageCount(business_id, 'win_back_contact');
+    if (usedThisMonth >= limits.win_back_contacts) {
+      return res.status(403).json({ error: 'You\u2019ve reached this month\u2019s Win-Back contact limit. Upgrade for more, or try again next month.' });
     }
   }
   const { customerId } = req.params;
@@ -203,6 +209,11 @@ const markSent = async (req, res) => {
   if (!customer) {
     return res.status(404).json({ error: 'Customer not found.' });
   }
+
+  if (req.user.role !== 'super_admin') {
+    await recordUsage(business_id, 'win_back_contact', customer._id);
+  }
+
   res.json({ data: customer });
 };
 

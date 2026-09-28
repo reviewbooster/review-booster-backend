@@ -117,18 +117,29 @@ const getBusinessDetail = async (req, res) => {
 // reliably support that calculation yet.
 const getDashboardStats = async (req, res) => {
   const soon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const now = new Date();
+
+  // Trial model: a business is "on trial" while trial_ends_at is in the
+  // future (stored plan is normally 'free'); a paid plan only counts as paid
+  // until plan_expires_at passes -- after that they're effectively on Free.
+  const PAID_PLANS = ['starter', 'growth', 'pro', 'basic', 'agency'];
+  const paidValid = (plans) => ({
+    plan: { $in: plans },
+    is_suspended: false,
+    $or: [{ plan_expires_at: null }, { plan_expires_at: { $gt: now } }],
+  });
 
   const [
     totalBusinesses, trialBusinesses, suspendedBusinesses, paidBusinesses,
     totalCustomers, totalPublicReviews, totalPrivateFeedback, unresolvedFeedback,
     avgRatingAgg, pendingReferralCredits, expiringSoon,
-    basicCount, proCount, agencyCount,
+    basicCount, proCount, agencyCount, freeCount, starterCount, growthCount,
     viaReferralCount, selfSignupCount, adminCreatedCount, unknownSourceCount,
   ] = await Promise.all([
     Business.countDocuments({}),
-    Business.countDocuments({ plan: 'trial', is_suspended: false }),
+    Business.countDocuments({ plan: { $in: ['free', 'trial'] }, trial_ends_at: { $gt: now }, is_suspended: false }),
     Business.countDocuments({ is_suspended: true }),
-    Business.countDocuments({ plan: { $ne: 'trial' }, is_suspended: false }),
+    Business.countDocuments(paidValid(PAID_PLANS)),
     Customer.countDocuments({}),
     Review.countDocuments({ is_public: true }),
     Review.countDocuments({ is_public: false }),
@@ -138,13 +149,23 @@ const getDashboardStats = async (req, res) => {
     Business.countDocuments({
       is_suspended: false,
       $or: [
-        { plan: 'trial', trial_ends_at: { $lte: soon, $gte: new Date() } },
-        { plan: { $ne: 'trial' }, plan_expires_at: { $lte: soon, $gte: new Date() } },
+        { plan: { $in: ['free', 'trial'] }, trial_ends_at: { $lte: soon, $gte: now } },
+        { plan: { $in: PAID_PLANS }, plan_expires_at: { $lte: soon, $gte: now } },
       ],
     }),
-    Business.countDocuments({ plan: 'basic', is_suspended: false }),
-    Business.countDocuments({ plan: 'pro', is_suspended: false }),
-    Business.countDocuments({ plan: 'agency', is_suspended: false }),
+    Business.countDocuments(paidValid(['basic'])),
+    Business.countDocuments(paidValid(['pro'])),
+    Business.countDocuments(paidValid(['agency'])),
+    // Free = stored as Free (or a paid plan that has lapsed) and not currently in a trial.
+    Business.countDocuments({
+      is_suspended: false,
+      $and: [
+        { $or: [{ plan: { $in: ['free', 'trial'] } }, { plan: { $in: PAID_PLANS }, plan_expires_at: { $lte: now } }] },
+        { $or: [{ trial_ends_at: null }, { trial_ends_at: { $lte: now } }] },
+      ],
+    }),
+    Business.countDocuments(paidValid(['starter'])),
+    Business.countDocuments(paidValid(['growth'])),
     Business.countDocuments({ source: 'self_signup', referred_by_business_id: { $ne: null } }),
     Business.countDocuments({ source: 'self_signup', referred_by_business_id: null }),
     Business.countDocuments({ source: 'admin_created' }),
@@ -164,7 +185,11 @@ const getDashboardStats = async (req, res) => {
         suspended: suspendedBusinesses,
         expiring_soon: expiringSoon,
       },
-      subscriptions: { basic: basicCount, pro: proCount, agency: agencyCount },
+      subscriptions: {
+        free: freeCount, starter: starterCount, growth: growthCount, pro: proCount,
+        // legacy tiers -- drop to zero once every business is migrated
+        basic: basicCount, agency: agencyCount,
+      },
       growth_sources: {
         via_referral: viaReferralCount,
         self_signup: selfSignupCount,
@@ -195,8 +220,8 @@ const getNeedsAttention = async (req, res) => {
     Business.find({
       is_suspended: false,
       $or: [
-        { plan: 'trial', trial_ends_at: { $lte: soon, $gte: now } },
-        { plan: { $ne: 'trial' }, plan_expires_at: { $lte: soon, $gte: now } },
+        { plan: { $in: ['free', 'trial'] }, trial_ends_at: { $lte: soon, $gte: now } },
+        { plan: { $in: ['starter', 'growth', 'pro', 'basic', 'agency'] }, plan_expires_at: { $lte: soon, $gte: now } },
       ],
     }).select('name plan trial_ends_at plan_expires_at').sort({ plan_expires_at: 1, trial_ends_at: 1 }).limit(10).lean(),
 
@@ -225,7 +250,7 @@ const getNeedsAttention = async (req, res) => {
   res.json({
     data: {
       expiring: expiringBusinesses.map((b) => {
-        var isTrial = b.plan === 'trial';
+        var isTrial = b.plan === 'free' || b.plan === 'trial';
         var expiryDate = isTrial ? b.trial_ends_at : b.plan_expires_at;
         var daysLeft = Math.ceil((new Date(expiryDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
         return { business_id: b._id, business_name: b.name, plan: b.plan, days_left: daysLeft, expiry_date: expiryDate };

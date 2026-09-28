@@ -9,6 +9,9 @@
  */
 const FollowUp = require('../models/FollowUp');
 const Customer = require('../models/Customer');
+const Business = require('../models/Business');
+const { getEffectivePlanSlug, getPlanLimits } = require('../utils/planLimits');
+const { getUsageCount, recordUsage } = require('../utils/usageMeter');
 
 async function ownedCustomer(customerId, business_id) {
   return Customer.findOne({ _id: customerId, business_id }).select('_id name').lean();
@@ -41,6 +44,20 @@ const setFollowUp = async (req, res) => {
   if (!due_date || isNaN(parsedDate.getTime())) {
     return res.status(400).json({ error: 'A valid due date is required.' });
   }
+
+  if (req.user.role !== 'super_admin') {
+    const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
+    const myEffectivePlan = getEffectivePlanSlug(myBusiness);
+    const limits = await getPlanLimits(myEffectivePlan);
+    const usedThisMonth = await getUsageCount(business_id, 'follow_up');
+    if (usedThisMonth >= limits.follow_ups) {
+      const msg = myEffectivePlan === 'free'
+        ? 'Follow-up reminders aren\u2019t available on the Free plan. Upgrade to use this.'
+        : 'You\u2019ve used all of this month\u2019s follow-ups. Upgrade for more, or try again next month.';
+      return res.status(403).json({ error: msg });
+    }
+  }
+
   const cleanNote = (note || '').trim().slice(0, 300);
 
   const followUp = await FollowUp.findOneAndUpdate(
@@ -51,6 +68,11 @@ const setFollowUp = async (req, res) => {
     },
     { upsert: true, new: true }
   );
+
+  if (req.user.role !== 'super_admin') {
+    await recordUsage(business_id, 'follow_up', customer._id);
+  }
+
   res.json({ data: followUp });
 };
 

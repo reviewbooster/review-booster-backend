@@ -22,7 +22,12 @@ const PlanSchema = new Schema(
       // 'expired' isn't a real subscribable tier -- it's the feature set a
       // business falls back to the moment its trial or paid plan lapses.
       // Configurable on the same admin Plans page as everything else.
-      enum: ['trial', 'basic', 'pro', 'agency', 'expired'],
+      // 'free' / 'starter' / 'growth' are the new pricing-tier names being
+      // phased in -- 'trial' / 'basic' / 'agency' / 'expired' stay in the
+      // enum until the migration to the new tiers is complete (see
+      // planLimits.js), so existing businesses never hit an invalid plan
+      // value mid-rollout.
+      enum: ['trial', 'basic', 'pro', 'agency', 'expired', 'free', 'starter', 'growth'],
     },
     name: {
       type: String,
@@ -50,14 +55,24 @@ const PlanSchema = new Schema(
      * changes in behavior until an admin explicitly edits and saves here.
      */
     limits: {
-      customers:        { type: Number, default: null, min: 0 },
-      staff:            { type: Number, default: null, min: 0 },
-      ai_reply:         { type: Boolean, default: false },
-      engine_a:         { type: Boolean, default: false },
-      engine_b:         { type: Boolean, default: false },
-      win_back:         { type: Boolean, default: false },
-      analytics:        { type: Boolean, default: false },
-      custom_templates: { type: Boolean, default: false },
+      customers:         { type: Number, default: null, min: 0 },
+      staff:             { type: Number, default: null, min: 0 },
+      ai_reply:          { type: Boolean, default: false },
+      engine_a:          { type: Boolean, default: false },
+      engine_b:          { type: Boolean, default: false },
+      win_back:          { type: Boolean, default: false },
+      analytics:         { type: Boolean, default: false },
+      custom_templates:  { type: Boolean, default: false },
+      // -- New PDF-matching monthly quotas (null = unlimited, 0 = unavailable) --
+      review_requests:   { type: Number, default: null, min: 0 },
+      sms:               { type: Number, default: null, min: 0 },
+      ai_replies:        { type: Number, default: null, min: 0 },
+      follow_ups:        { type: Number, default: null, min: 0 },
+      win_back_contacts: { type: Number, default: null, min: 0 },
+      // Display-only for now -- there is no multi-location feature in the
+      // app yet, so this is not enforced anywhere. Purely informational
+      // until (if) real multi-location support gets built.
+      locations:         { type: Number, default: 1, min: 1 },
     },
   },
   {

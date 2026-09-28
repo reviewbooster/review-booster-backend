@@ -10,6 +10,8 @@ const nodeCrypto    = require('crypto');
 const Customer      = require('../models/Customer');
 const ReviewRequest = require('../models/ReviewRequest');
 const Business      = require('../models/Business');
+const { getEffectivePlanSlug, getPlanLimits } = require('../utils/planLimits');
+const { getReviewRequestCount } = require('../utils/usageMeter');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
@@ -46,6 +48,26 @@ const sendRequest = async (req, res) => {
   }
   if ((channel === 'whatsapp' || channel === 'sms') && !customer.phone) {
     return res.status(422).json({ error: 'This customer has no phone number.' });
+  }
+
+  if (req.user.role !== 'super_admin') {
+    const myBusiness = await Business.findById(req.user.business_id).select('plan trial_ends_at plan_expires_at').lean();
+    const myEffectivePlan = getEffectivePlanSlug(myBusiness);
+    const limits = await getPlanLimits(myEffectivePlan);
+
+    const usedThisMonth = await getReviewRequestCount(req.user.business_id);
+    if (usedThisMonth >= limits.review_requests) {
+      const msg = myEffectivePlan === 'free'
+        ? 'You\u2019ve reached this month\u2019s review request limit. Upgrade to send more.'
+        : 'You\u2019ve reached this month\u2019s review request limit for your plan.';
+      return res.status(403).json({ error: msg });
+    }
+    if (channel === 'sms') {
+      const smsThisMonth = await getReviewRequestCount(req.user.business_id, 'sms');
+      if (smsThisMonth >= limits.sms) {
+        return res.status(403).json({ error: 'You\u2019ve reached this month\u2019s SMS limit for your plan.' });
+      }
+    }
   }
 
   // Generate secure token — 64 hex chars (256-bit entropy)

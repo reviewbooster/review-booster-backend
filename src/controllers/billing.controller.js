@@ -11,7 +11,9 @@ const Plan                    = require('../models/Plan');
 const PlatformBillingSettings = require('../models/PlatformBillingSettings');
 const BusinessReferralSettings = require('../models/BusinessReferralSettings');
 const { logAction } = require('./auditLog.controller');
-const { clearPlanLimitsCache, FEATURE_LABELS } = require('../utils/planLimits');
+const Customer = require('../models/Customer');
+const { clearPlanLimitsCache, FEATURE_LABELS, getEffectivePlanSlug, getPlanLimits, setTrialPlanCache } = require('../utils/planLimits');
+const { getUsageCount, getReviewRequestCount } = require('../utils/usageMeter');
 
 const PLAN_DEFAULTS = {
   trial:   { name: 'Trial',   sort: 0 },
@@ -22,6 +24,13 @@ const PLAN_DEFAULTS = {
   // purchasable list below. It's the feature set enforced the moment a
   // business's trial or paid plan lapses.
   expired: { name: 'Expired', sort: 4 },
+  // -- New pricing tiers, being configured ahead of the actual cutover.
+  // Kept out of the customer-facing list (see getPlans below) until the
+  // migration is complete, so nothing half-finished reaches real business
+  // owners in the meantime -- visible only in the Super Admin Plans page.
+  free:    { name: 'Free',    sort: 5 },
+  starter: { name: 'Starter', sort: 6 },
+  growth:  { name: 'Growth',  sort: 7 },
 };
 
 // Builds the feature list shown to business owners straight from what's
@@ -29,10 +38,40 @@ const PLAN_DEFAULTS = {
 // marketing lines the admin typed in free text. Keeps the two in sync
 // automatically instead of requiring the admin to type out ticked features
 // by hand.
-function mergePlanFeatures(plan) {
-  const limits = (plan && plan.limits) || {};
-  const autoLines = Object.keys(FEATURE_LABELS).filter((key) => limits[key]).map((key) => FEATURE_LABELS[key]);
-  return autoLines.concat((plan && plan.features) || []);
+async function mergePlanFeatures(plan) {
+  // Uses the same effective limits that enforcement uses (saved values if
+  // the admin customized this plan, hardcoded defaults otherwise), so what
+  // an owner reads on the card is exactly what the app enforces.
+  const limits = await getPlanLimits(plan && plan.slug);
+  const lines = [];
+  const fmt = (n) => Number(n).toLocaleString('en-IN');
+  const quota = (n, text) => {
+    if (n === undefined || n === 0) return;           // not on this plan
+    lines.push(n === Infinity ? 'Unlimited ' + text : fmt(n) + ' ' + text);
+  };
+  const hasNewQuotas = limits.review_requests !== undefined;
+
+  if (hasNewQuotas) {
+    quota(limits.review_requests, 'review requests/month');
+    quota(limits.customers, 'customers stored');
+    if (limits.staff !== undefined) {
+      lines.push(limits.staff === Infinity ? 'Unlimited team members' : (limits.staff + 1) + ' team member' + (limits.staff + 1 === 1 ? '' : 's'));
+    }
+    quota(limits.sms, 'SMS/month');
+    quota(limits.ai_replies, 'AI reply generations/month');
+    quota(limits.follow_ups, 'follow-ups/month');
+    quota(limits.win_back_contacts, 'win-back contacts/month');
+    if (limits.locations) lines.push(limits.locations + ' location' + (limits.locations === 1 ? '' : 's'));
+  }
+
+  // Ticked features. AI replies and Win-Back are already shown above as
+  // quotas on the new tiers, so they're skipped here to avoid duplicates.
+  Object.keys(FEATURE_LABELS).forEach((key) => {
+    if (hasNewQuotas && (key === 'ai_reply' || key === 'win_back')) return;
+    if (limits[key]) lines.push(FEATURE_LABELS[key]);
+  });
+
+  return lines.concat((plan && plan.features) || []);
 }
 
 // Ensures all three plan docs exist (lazy-created with a $0 placeholder
@@ -68,6 +107,8 @@ async function getOrDefaultPlatformSettings() {
     upi_payee_name: null,
     contact_whatsapp: null,
     instructions: null,
+    trial_days: 14,
+    trial_plan: 'growth',
   };
 }
 
@@ -75,14 +116,19 @@ async function getOrDefaultPlatformSettings() {
 // Trial is never purchasable â€” it's assigned automatically at signup or
 // manually by admin, so it's excluded here even though it's an editable
 // "plan" entry in the admin Billing Settings screen.
+const PUBLIC_PLAN_ORDER = ['free', 'starter', 'growth', 'pro'];
+
 const getPlans = async (req, res) => {
   const all = await getOrCreateAllPlans();
-  const active = all
-    .filter((p) => p.is_active && p.slug !== 'trial' && p.slug !== 'expired')
-    .map((p) => {
-      const obj = p.toObject ? p.toObject() : p;
-      return Object.assign({}, obj, { features: mergePlanFeatures(obj) });
-    });
+  // Owners see exactly the four current tiers, in pricing-page order. The
+  // legacy trial/basic/agency/expired rows stay in the admin list only.
+  const visible = all
+    .filter((p) => p.is_active && PUBLIC_PLAN_ORDER.includes(p.slug))
+    .sort((a, b) => PUBLIC_PLAN_ORDER.indexOf(a.slug) - PUBLIC_PLAN_ORDER.indexOf(b.slug));
+  const active = await Promise.all(visible.map(async (p) => {
+    const obj = p.toObject ? p.toObject() : p;
+    return Object.assign({}, obj, { features: await mergePlanFeatures(obj) });
+  }));
   res.json({ data: active });
 };
 
@@ -97,7 +143,35 @@ const getMyBillingStatus = async (req, res) => {
   if (!business) {
     return res.status(404).json({ error: 'Business not found.' });
   }
-  res.json({ data: business });
+
+  // Live "used vs. limit" for everything metered on the current plan. An
+  // unlimited limit is Infinity server-side, which JSON turns into null --
+  // the frontend reads null as "Unlimited", same convention as the Plans
+  // admin page.
+  const effectivePlan = getEffectivePlanSlug(business);
+  const limits = await getPlanLimits(effectivePlan);
+  const [reviewRequestsUsed, smsUsed, aiRepliesUsed, followUpsUsed, winBackUsed, customersUsed] = await Promise.all([
+    getReviewRequestCount(business._id),
+    getReviewRequestCount(business._id, 'sms'),
+    getUsageCount(business._id, 'ai_reply'),
+    getUsageCount(business._id, 'follow_up'),
+    getUsageCount(business._id, 'win_back_contact'),
+    Customer.countDocuments({ business_id: business._id }),
+  ]);
+
+  res.json({
+    data: Object.assign({}, business, {
+      effective_plan: effectivePlan,
+      usage: {
+        review_requests:   { used: reviewRequestsUsed, limit: limits.review_requests },
+        sms:               { used: smsUsed,            limit: limits.sms },
+        ai_replies:        { used: aiRepliesUsed,      limit: limits.ai_replies },
+        follow_ups:        { used: followUpsUsed,      limit: limits.follow_ups },
+        win_back_contacts: { used: winBackUsed,        limit: limits.win_back_contacts },
+        customers:         { used: customersUsed,      limit: limits.customers },
+      },
+    }),
+  });
 };
 
 // GET /api/billing/payment-info?plan=basic â€” owner or staff
@@ -106,7 +180,7 @@ const getMyBillingStatus = async (req, res) => {
 // UPI deep link with the amount pre-filled.
 const getPaymentInfo = async (req, res) => {
   const slug = req.query.plan;
-  if (!PLAN_DEFAULTS[slug] || slug === 'expired') {
+  if (!PLAN_DEFAULTS[slug] || slug === 'expired' || slug === 'free') {
     return res.status(400).json({ error: 'Unknown plan.' });
   }
   const all = await getOrCreateAllPlans();
@@ -141,7 +215,7 @@ const getPaymentInfo = async (req, res) => {
 
   res.json({
     data: {
-      plan: { slug: plan.slug, name: plan.name, price_monthly: displayPrice, original_price_monthly: plan.price_monthly, features: mergePlanFeatures(plan) },
+      plan: { slug: plan.slug, name: plan.name, price_monthly: displayPrice, original_price_monthly: plan.price_monthly, features: await mergePlanFeatures(plan) },
       referral_discount_applied,
       upi_id: settings.upi_id,
       upi_payee_name: settings.upi_payee_name,
@@ -157,7 +231,16 @@ const getPaymentInfo = async (req, res) => {
 // GET /api/admin/plans â€” super_admin, all plans (active + inactive)
 const listPlansAdmin = async (req, res) => {
   const all = await getOrCreateAllPlans();
-  res.json({ data: all });
+  // Overlay the limits the app actually enforces (saved values if the plan
+  // was customized, built-in defaults otherwise) so the admin form never
+  // prefills blank -- blank means "unlimited", and saving a card with blank
+  // quotas would otherwise silently make that plan unlimited.
+  const data = await Promise.all(all.map(async (p) => {
+    const obj = p.toObject ? p.toObject() : p;
+    const effective = await getPlanLimits(obj.slug);
+    return Object.assign({}, obj, { limits: Object.assign({}, obj.limits, effective) });
+  }));
+  res.json({ data });
 };
 
 // PATCH /api/admin/plans/:slug â€” super_admin
@@ -217,19 +300,33 @@ const getPlatformSettingsAdmin = async (req, res) => {
 
 // PATCH /api/admin/platform-settings â€” super_admin
 const updatePlatformSettings = async (req, res) => {
-  const { upi_id, upi_payee_name, contact_whatsapp, instructions } = req.body;
+  const { upi_id, upi_payee_name, contact_whatsapp, instructions, trial_days, trial_plan } = req.body;
 
   const update = {};
   if (upi_id !== undefined) update.upi_id = (upi_id || '').trim() || null;
   if (upi_payee_name !== undefined) update.upi_payee_name = (upi_payee_name || '').trim() || null;
   if (contact_whatsapp !== undefined) update.contact_whatsapp = (contact_whatsapp || '').trim() || null;
   if (instructions !== undefined) update.instructions = (instructions || '').trim().slice(0, 500) || null;
+  if (trial_days !== undefined) {
+    const n = parseInt(trial_days, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 90) {
+      return res.status(400).json({ error: 'Trial length must be between 1 and 90 days.' });
+    }
+    update.trial_days = n;
+  }
+  if (trial_plan !== undefined) {
+    if (['starter', 'growth', 'pro'].indexOf(trial_plan) === -1) {
+      return res.status(400).json({ error: 'Trial plan must be Starter, Growth, or Pro.' });
+    }
+    update.trial_plan = trial_plan;
+  }
 
   const settings = await PlatformBillingSettings.findOneAndUpdate(
     {},
     { $set: update },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
+  if (update.trial_plan) setTrialPlanCache(update.trial_plan); // takes effect immediately
   await logAction(req, { action: 'billing.update_platform_settings', metadata: update });
   res.json({ data: settings });
 };
@@ -241,7 +338,7 @@ const activateBusinessPlan = async (req, res) => {
   const { id } = req.params;
   const { plan, days } = req.body;
 
-  if (!PLAN_DEFAULTS[plan]) {
+  if (!PLAN_DEFAULTS[plan] || plan === 'expired') {
     return res.status(400).json({ error: 'Unknown plan.' });
   }
   const numDays = parseInt(days, 10);
@@ -254,7 +351,10 @@ const activateBusinessPlan = async (req, res) => {
     return res.status(404).json({ error: 'Business not found.' });
   }
 
-  business.plan = plan;
+  // Extending a trial only moves the trial date -- it never changes the
+  // business's actual plan, so they fall back to Free (not the retired
+  // 'trial' value) when the extension ends.
+  if (plan !== 'trial') business.plan = plan;
   if (plan === 'trial') {
     // Trial uses trial_ends_at, not plan_expires_at â€” and doesn't touch
     // the Engine B discount flag, since no purchase is happening.

@@ -11,7 +11,8 @@ const Business = require('../models/Business');
 const Customer = require('../models/Customer');
 const { generateReply } = require('../utils/replyTemplates');
 const { buildBrandedCsv, sendBrandedPdf } = require('../utils/exportBranding');
-const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
+const { canUseFeature, getEffectivePlanSlug, getPlanLimits } = require('../utils/planLimits');
+const { getUsageCount, recordUsage } = require('../utils/usageMeter');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
@@ -198,11 +199,18 @@ const generateReplyForReview = async (req, res) => {
   const business = await Business.findById(review.business_id).select('name plan trial_ends_at plan_expires_at').lean();
   const effectivePlan = getEffectivePlanSlug(business);
 
-  if (req.user.role !== 'super_admin' && !(await canUseFeature(effectivePlan, 'ai_reply'))) {
-    const msg = effectivePlan === 'expired'
-      ? 'Your plan has expired \u2014 renew to keep using this.'
-      : 'AI reply drafts aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
-    return res.status(403).json({ error: msg });
+  if (req.user.role !== 'super_admin') {
+    const limits = await getPlanLimits(effectivePlan);
+    if (!limits.ai_reply) {
+      const msg = effectivePlan === 'expired'
+        ? 'Your plan has expired \u2014 renew to keep using this.'
+        : 'AI reply drafts aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
+      return res.status(403).json({ error: msg });
+    }
+    const usedThisMonth = await getUsageCount(review.business_id, 'ai_reply');
+    if (usedThisMonth >= limits.ai_replies) {
+      return res.status(403).json({ error: 'You\u2019ve used all of this month\u2019s AI reply generations. Upgrade for more, or try again next month.' });
+    }
   }
 
   const { template } = req.body || {};
@@ -216,6 +224,10 @@ const generateReplyForReview = async (req, res) => {
     feedbackText: review.feedback_text,
     template: template || 'apologize',
   });
+
+  if (req.user.role !== 'super_admin') {
+    await recordUsage(review.business_id, 'ai_reply', review._id);
+  }
 
   res.json({ data: { draft } });
 };
