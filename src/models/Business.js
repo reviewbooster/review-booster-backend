@@ -143,6 +143,22 @@ const BusinessSchema = new Schema(
       type: [String],
       default: [],
     },
+    // The owner's own Google review count and rating. ReviewBooster can't
+    // read Google, so these are typed in and always shown as "entered by
+    // you". baseline = the starting point; updates = later readings, newest
+    // last (capped so it can't grow without bound).
+    google_numbers: {
+      baseline: {
+        review_count: { type: Number, min: 0 },
+        rating:       { type: Number, min: 1, max: 5, default: null },
+        entered_at:   { type: Date },
+      },
+      updates: [{
+        review_count: { type: Number, min: 0 },
+        rating:       { type: Number, min: 1, max: 5, default: null },
+        entered_at:   { type: Date, default: Date.now },
+      }],
+    },
     qr_token: {
       type:    String,
       unique:  true,

@@ -16,6 +16,7 @@ const Alert         = require('../models/Alert');
 const { logAction } = require('./auditLog.controller');
 const { getPlanLimits, canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 const { lockedResponse } = require('../utils/planGate');
+const { buildResults } = require('../utils/resultsSnapshot');
 
 // GET /api/business
 const listBusinesses = async (req, res) => {
@@ -436,4 +437,54 @@ const deleteStaff = async (req, res) => {
   res.json({ data: { message: 'Staff account removed.' } });
 };
 
-module.exports = { listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff };
+// GET /api/business/my-results -- owner or staff. The owner's own Google
+// numbers (typed in -- ReviewBooster can't read Google) plus activity counted
+// live from real records since the business joined. Nothing is estimated.
+const getMyResults = async (req, res) => {
+  if (!req.user.business_id) {
+    return res.status(403).json({ error: 'No business associated with this account.' });
+  }
+  const data = await buildResults(req.user.business_id);
+  if (!data) {
+    return res.status(404).json({ error: 'Business not found.' });
+  }
+  res.json({ data: data });
+};
+// PUT /api/business/my-google-numbers -- owner only. kind 'baseline' sets or
+// corrects the starting numbers; kind 'update' adds a newer reading.
+const setGoogleNumbers = async (req, res) => {
+  const { kind, review_count, rating } = req.body || {};
+  const n = Number(review_count);
+  if (!Number.isInteger(n) || n < 0 || n > 10000000) {
+    return res.status(400).json({ error: 'Review count must be a whole number.' });
+  }
+  let stars = null;
+  if (n > 0) {
+    stars = Number(rating);
+    if (!(stars >= 1 && stars <= 5)) {
+      return res.status(400).json({ error: 'Rating must be between 1 and 5.' });
+    }
+    stars = Math.round(stars * 10) / 10;
+  }
+  const entry = { review_count: n, rating: stars, entered_at: new Date() };
+
+  if (kind === 'baseline') {
+    await Business.updateOne({ _id: req.user.business_id }, { $set: { 'google_numbers.baseline': entry } });
+  } else if (kind === 'update') {
+    const existing = await Business.findById(req.user.business_id).select('google_numbers.baseline').lean();
+    const hasBaseline = existing && existing.google_numbers && existing.google_numbers.baseline &&
+      existing.google_numbers.baseline.review_count != null;
+    if (!hasBaseline) {
+      return res.status(400).json({ error: 'Enter your starting numbers first.' });
+    }
+    await Business.updateOne(
+      { _id: req.user.business_id },
+      { $push: { 'google_numbers.updates': { $each: [entry], $slice: -24 } } }
+    );
+  } else {
+    return res.status(400).json({ error: 'Unknown request.' });
+  }
+  res.json({ data: entry });
+};
+
+module.exports = { getMyResults, setGoogleNumbers, listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff };

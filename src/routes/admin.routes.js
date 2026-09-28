@@ -6,6 +6,7 @@ const billing   = require('../controllers/billing.controller');
 const businessReferral = require('../controllers/businessReferral.controller');
 const auditLog = require('../controllers/auditLog.controller');
 const supportChat = require('../controllers/supportChat.controller');
+const adminSuccessStory = require('../controllers/adminSuccessStory.controller');
 const asyncWrap = require('../utils/asyncWrap');
 
 const router = express.Router();
@@ -37,5 +38,12 @@ router.get('/support-chats',                   asyncWrap(supportChat.listChatsAd
 router.get('/support-chats/:id',                asyncWrap(supportChat.getChatAdmin));
 router.post('/support-chats/:id/messages',      asyncWrap(supportChat.replyChatAdmin));
 router.patch('/support-chats/:id',              asyncWrap(supportChat.setChatStatusAdmin));
+
+// Success Stories -- review pipeline (specific paths before the :id ones)
+router.get('/success-stories/potential',  asyncWrap(adminSuccessStory.listPotential));
+router.post('/success-stories/invite',    asyncWrap(adminSuccessStory.inviteBusiness));
+router.get('/success-stories',            asyncWrap(adminSuccessStory.listStories));
+router.get('/success-stories/:id',        asyncWrap(adminSuccessStory.getStory));
+router.patch('/success-stories/:id',      asyncWrap(adminSuccessStory.decideStory));
 
 module.exports = router;

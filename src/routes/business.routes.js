@@ -7,9 +7,10 @@ const roleGuard = require('../middleware/roleGuard');
 const asyncWrap = require('../utils/asyncWrap');
 const {
   listBusinesses, deleteBusiness, resetBusinessPassword,
-  getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo,
+  getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, getMyResults, setGoogleNumbers, uploadMyLogo, deleteMyLogo,
   updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff,
 } = require('../controllers/business.controller');
+const { getMyStory, saveMyStory, withdrawMyStory } = require('../controllers/successStory.controller');
 const upload = multer({
   storage: multer.memoryStorage(),
   limits:  { fileSize: 10 * 1024 * 1024 }, // 10MB -- phone camera photos are often 3-8MB; Cloudinary resizes to 400x400 regardless
@@ -25,6 +26,11 @@ router.get('/my-qr',          auth,                              asyncWrap(getMy
 router.get('/my-settings',    auth,                              asyncWrap(getMySettings));
 router.patch('/my-settings',  auth, roleGuard('owner'),           asyncWrap(updateMySettings));
 router.patch('/my-settings/feature-seen', auth,                   asyncWrap(markFeatureSeen)); // owner OR staff
+router.get('/my-results',   auth,                              asyncWrap(getMyResults)); // owner + staff
+router.put('/my-google-numbers', auth, roleGuard('owner'),   asyncWrap(setGoogleNumbers));
+router.get('/my-success-story',    auth, roleGuard('owner'), asyncWrap(getMyStory));
+router.put('/my-success-story',    auth, roleGuard('owner'), asyncWrap(saveMyStory));
+router.delete('/my-success-story', auth, roleGuard('owner'), asyncWrap(withdrawMyStory));
 router.post('/my-logo',       auth, roleGuard('owner'), upload.single('logo'), asyncWrap(uploadMyLogo));
 router.delete('/my-logo',     auth, roleGuard('owner'), asyncWrap(deleteMyLogo));
 
