@@ -32,6 +32,9 @@ const Customer    = require('./src/models/Customer');
 const StaffMember = require('./src/models/StaffMember');
 const { PLAN_LIMITS } = require('./src/utils/planLimits');
 
+// node migrate-plans-to-new-tiers.js --dry-run   -> prints everything, saves nothing
+const DRY_RUN = process.argv.includes('--dry-run');
+
 const SLUG_MAP = {
   trial:  'free',
   basic:  'starter',
@@ -74,12 +77,16 @@ async function main() {
       warned++;
     }
 
-    business.plan = newSlug;
-    await business.save();
+    if (!DRY_RUN) {
+      // Direct update: only the plan field changes, and an old record that
+      // is missing some newer required field can't abort the whole run.
+      await Business.updateOne({ _id: business._id }, { $set: { plan: newSlug } });
+    }
     migrated++;
-    console.log('  ' + business.name + ': ' + oldSlug + ' -> ' + newSlug);
+    console.log('  ' + (DRY_RUN ? '[dry run] ' : '') + business.name + ': ' + oldSlug + ' -> ' + newSlug);
   }
 
+  if (DRY_RUN) console.log('DRY RUN -- nothing was saved. Run again without --dry-run to apply.');
   console.log('Done. Migrated', migrated, 'business(es),', warned, 'warning(s) printed above.');
   console.log('Nothing is enforced differently yet from this alone -- Stage 4 is what wires real gating to these new tiers.');
 

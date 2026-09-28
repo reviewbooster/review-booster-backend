@@ -396,8 +396,8 @@ const createStaff = async (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 8 characters.' });
   }
 
-  const myBusiness = await Business.findById(req.user.business_id).select('plan').lean();
-  const limits = await getPlanLimits(myBusiness?.plan);
+  const myBusiness = await Business.findById(req.user.business_id).select('plan trial_ends_at plan_expires_at').lean();
+  const limits = await getPlanLimits(getEffectivePlanSlug(myBusiness));
   const currentStaffCount = await User.countDocuments({ business_id: req.user.business_id, role: 'staff' });
   if (currentStaffCount >= limits.staff) {
     return res.status(403).json({ error: limits.staff === 0
