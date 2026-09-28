@@ -288,6 +288,15 @@ const updatePlan = async (req, res) => {
     update['limits.win_back']         = !!limits.win_back;
     update['limits.analytics']        = !!limits.analytics;
     update['limits.custom_templates'] = !!limits.custom_templates;
+    // Monthly quotas (blank = unlimited, 0 = not available on this plan)
+    update['limits.review_requests']   = toLimit(limits.review_requests);
+    update['limits.sms']               = toLimit(limits.sms);
+    update['limits.ai_replies']        = toLimit(limits.ai_replies);
+    update['limits.follow_ups']        = toLimit(limits.follow_ups);
+    update['limits.win_back_contacts'] = toLimit(limits.win_back_contacts);
+    // Locations is display-only for now, but it still has to save.
+    var locs = parseInt(limits.locations, 10);
+    update['limits.locations'] = (Number.isFinite(locs) && locs >= 1) ? locs : 1;
   }
 
   await getOrCreateAllPlans(); // ensure the doc exists before updating
