@@ -12,6 +12,7 @@ const Review          = require('../models/Review');
 const Business        = require('../models/Business');
 const FollowUp        = require('../models/FollowUp');
 const { getPlanLimits, getEffectivePlanSlug } = require('../utils/planLimits');
+const { lockedResponse } = require('../utils/planGate');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
@@ -92,7 +93,7 @@ const createCustomer = async (req, res) => {
     const limits = await getPlanLimits(getEffectivePlanSlug(business));
     const currentCount = await Customer.countDocuments(filter);
     if (currentCount >= limits.customers) {
-      return res.status(403).json({ error: 'You\u2019ve reached your plan\u2019s customer limit (' + limits.customers + '). Upgrade your plan to add more.' });
+      return lockedResponse(res, business, { kind: 'cap', feature: 'customers', limit: limits.customers });
     }
   }
 

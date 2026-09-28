@@ -15,6 +15,7 @@ const WinBackSettings   = require('../models/WinBackSettings');
 const Business          = require('../models/Business');
 const { getWinBackDefaults } = require('../utils/winbackDefaults');
 const { canUseFeature, getEffectivePlanSlug, getPlanLimits } = require('../utils/planLimits');
+const { lockedResponse } = require('../utils/planGate');
 const { getUsageCount, recordUsage } = require('../utils/usageMeter');
 
 async function getOrDefaultSettings(business_id) {
@@ -101,10 +102,7 @@ const getDueCustomers = async (req, res) => {
     const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
     const myEffectivePlan = getEffectivePlanSlug(myBusiness);
     if (!(await canUseFeature(myEffectivePlan, 'win_back'))) {
-      const msg = myEffectivePlan === 'expired'
-        ? 'Your plan has expired \u2014 renew to keep using this.'
-        : 'Win-Back isn\u2019t available on your current plan. Upgrade to use this.';
-      return res.status(403).json({ error: msg });
+      return lockedResponse(res, myBusiness, { kind: 'feature', feature: 'win_back' });
     }
   }
   const settings = await getOrDefaultSettings(business_id);
@@ -188,14 +186,11 @@ const markSent = async (req, res) => {
     const myEffectivePlan = getEffectivePlanSlug(myBusiness);
     const limits = await getPlanLimits(myEffectivePlan);
     if (!limits.win_back) {
-      const msg = myEffectivePlan === 'expired'
-        ? 'Your plan has expired \u2014 renew to keep using this.'
-        : 'Win-Back isn\u2019t available on your current plan. Upgrade to use this.';
-      return res.status(403).json({ error: msg });
+      return lockedResponse(res, myBusiness, { kind: 'feature', feature: 'win_back' });
     }
     const usedThisMonth = await getUsageCount(business_id, 'win_back_contact');
     if (usedThisMonth >= limits.win_back_contacts) {
-      return res.status(403).json({ error: 'You\u2019ve reached this month\u2019s Win-Back contact limit. Upgrade for more, or try again next month.' });
+      return lockedResponse(res, myBusiness, { kind: 'quota', feature: 'win_back_contacts', limit: limits.win_back_contacts });
     }
   }
   const { customerId } = req.params;

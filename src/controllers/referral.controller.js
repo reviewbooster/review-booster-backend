@@ -19,6 +19,7 @@ const ReferralSignup   = require('../models/ReferralSignup');
 const ReferralSettings = require('../models/ReferralSettings');
 const Business         = require('../models/Business');
 const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
+const { lockedResponse } = require('../utils/planGate');
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 
@@ -256,10 +257,7 @@ const redeemReferral = async (req, res) => {
     const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
     const myEffectivePlan = getEffectivePlanSlug(myBusiness);
     if (!(await canUseFeature(myEffectivePlan, 'engine_a'))) {
-      const msg = myEffectivePlan === 'expired'
-        ? 'Your plan has expired \u2014 renew to keep using this.'
-        : 'Customer referrals aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
-      return res.status(403).json({ error: msg });
+      return lockedResponse(res, myBusiness, { kind: 'feature', feature: 'engine_a' });
     }
   }
 
@@ -389,10 +387,7 @@ const getCustomerReferral = async (req, res) => {
     const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
     const myEffectivePlan = getEffectivePlanSlug(myBusiness);
     if (!(await canUseFeature(myEffectivePlan, 'engine_a'))) {
-      const msg = myEffectivePlan === 'expired'
-        ? 'Your plan has expired \u2014 renew to keep using this.'
-        : 'Customer referrals aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
-      return res.status(403).json({ error: msg });
+      return lockedResponse(res, myBusiness, { kind: 'feature', feature: 'engine_a' });
     }
   }
   const customer = await Customer.findOne({ _id: req.params.customer_id, business_id }).select('_id');

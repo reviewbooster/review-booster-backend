@@ -11,6 +11,7 @@ const FollowUp = require('../models/FollowUp');
 const Customer = require('../models/Customer');
 const Business = require('../models/Business');
 const { getEffectivePlanSlug, getPlanLimits } = require('../utils/planLimits');
+const { lockedResponse } = require('../utils/planGate');
 const { getUsageCount, recordUsage } = require('../utils/usageMeter');
 
 async function ownedCustomer(customerId, business_id) {
@@ -51,10 +52,7 @@ const setFollowUp = async (req, res) => {
     const limits = await getPlanLimits(myEffectivePlan);
     const usedThisMonth = await getUsageCount(business_id, 'follow_up');
     if (usedThisMonth >= limits.follow_ups) {
-      const msg = myEffectivePlan === 'free'
-        ? 'Follow-up reminders aren\u2019t available on the Free plan. Upgrade to use this.'
-        : 'You\u2019ve used all of this month\u2019s follow-ups. Upgrade for more, or try again next month.';
-      return res.status(403).json({ error: msg });
+      return lockedResponse(res, myBusiness, { kind: 'quota', feature: 'follow_ups', limit: limits.follow_ups });
     }
   }
 

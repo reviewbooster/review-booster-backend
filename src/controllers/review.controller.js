@@ -12,6 +12,7 @@ const Customer = require('../models/Customer');
 const { generateReply } = require('../utils/replyTemplates');
 const { buildBrandedCsv, sendBrandedPdf } = require('../utils/exportBranding');
 const { canUseFeature, getEffectivePlanSlug, getPlanLimits } = require('../utils/planLimits');
+const { lockedResponse } = require('../utils/planGate');
 const { getUsageCount, recordUsage } = require('../utils/usageMeter');
 
 const tenantFilter = (user) => {
@@ -202,14 +203,11 @@ const generateReplyForReview = async (req, res) => {
   if (req.user.role !== 'super_admin') {
     const limits = await getPlanLimits(effectivePlan);
     if (!limits.ai_reply) {
-      const msg = effectivePlan === 'expired'
-        ? 'Your plan has expired \u2014 renew to keep using this.'
-        : 'AI reply drafts aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
-      return res.status(403).json({ error: msg });
+      return lockedResponse(res, business, { kind: 'feature', feature: 'ai_reply' });
     }
     const usedThisMonth = await getUsageCount(review.business_id, 'ai_reply');
     if (usedThisMonth >= limits.ai_replies) {
-      return res.status(403).json({ error: 'You\u2019ve used all of this month\u2019s AI reply generations. Upgrade for more, or try again next month.' });
+      return lockedResponse(res, business, { kind: 'quota', feature: 'ai_replies', limit: limits.ai_replies });
     }
   }
 

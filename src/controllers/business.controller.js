@@ -15,6 +15,7 @@ const Review        = require('../models/Review');
 const Alert         = require('../models/Alert');
 const { logAction } = require('./auditLog.controller');
 const { getPlanLimits, canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
+const { lockedResponse } = require('../utils/planGate');
 
 // GET /api/business
 const listBusinesses = async (req, res) => {
@@ -240,10 +241,7 @@ const updateMySettings = async (req, res) => {
     if (req.user.role !== 'super_admin') {
       const myEffectivePlan = getEffectivePlanSlug(business);
       if (!(await canUseFeature(myEffectivePlan, 'custom_templates'))) {
-        const msg = myEffectivePlan === 'expired'
-          ? 'Your plan has expired \u2014 renew to keep customizing message templates.'
-          : 'Custom message templates aren\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
-        return res.status(403).json({ error: msg });
+        return lockedResponse(res, business, { kind: 'feature', feature: 'custom_templates' });
       }
     }
     var mt = message_templates || {};
@@ -400,9 +398,7 @@ const createStaff = async (req, res) => {
   const limits = await getPlanLimits(getEffectivePlanSlug(myBusiness));
   const currentStaffCount = await User.countDocuments({ business_id: req.user.business_id, role: 'staff' });
   if (currentStaffCount >= limits.staff) {
-    return res.status(403).json({ error: limits.staff === 0
-      ? 'Staff accounts aren\u2019t available on your current plan. Upgrade to add staff.'
-      : 'You\u2019ve reached your plan\u2019s staff limit (' + limits.staff + '). Upgrade your plan to add more.' });
+    return lockedResponse(res, myBusiness, { kind: 'cap', feature: 'staff', limit: limits.staff });
   }
 
   const existing = await User.findOne({ email: email.toLowerCase().trim() });

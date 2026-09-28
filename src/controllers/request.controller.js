@@ -11,6 +11,7 @@ const Customer      = require('../models/Customer');
 const ReviewRequest = require('../models/ReviewRequest');
 const Business      = require('../models/Business');
 const { getEffectivePlanSlug, getPlanLimits } = require('../utils/planLimits');
+const { lockedResponse } = require('../utils/planGate');
 const { getReviewRequestCount } = require('../utils/usageMeter');
 
 const tenantFilter = (user) => {
@@ -57,15 +58,12 @@ const sendRequest = async (req, res) => {
 
     const usedThisMonth = await getReviewRequestCount(req.user.business_id);
     if (usedThisMonth >= limits.review_requests) {
-      const msg = myEffectivePlan === 'free'
-        ? 'You\u2019ve reached this month\u2019s review request limit. Upgrade to send more.'
-        : 'You\u2019ve reached this month\u2019s review request limit for your plan.';
-      return res.status(403).json({ error: msg });
+      return lockedResponse(res, myBusiness, { kind: 'quota', feature: 'review_requests', limit: limits.review_requests });
     }
     if (channel === 'sms') {
       const smsThisMonth = await getReviewRequestCount(req.user.business_id, 'sms');
       if (smsThisMonth >= limits.sms) {
-        return res.status(403).json({ error: 'You\u2019ve reached this month\u2019s SMS limit for your plan.' });
+        return lockedResponse(res, myBusiness, { kind: 'quota', feature: 'sms', limit: limits.sms });
       }
     }
   }

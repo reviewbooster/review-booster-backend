@@ -13,6 +13,7 @@ const BusinessReferralSignup  = require('../models/BusinessReferralSignup');
 const BusinessReferralSettings = require('../models/BusinessReferralSettings');
 const { logAction } = require('./auditLog.controller');
 const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
+const { lockedResponse } = require('../utils/planGate');
 
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 function generateShortCode() {
@@ -60,10 +61,7 @@ const getMyCode = async (req, res) => {
     const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
     const myEffectivePlan = getEffectivePlanSlug(myBusiness);
     if (!(await canUseFeature(myEffectivePlan, 'engine_b'))) {
-      const msg = myEffectivePlan === 'expired'
-        ? 'Your plan has expired \u2014 renew to keep using this.'
-        : 'Referring other businesses isn\u2019t available on your current plan. Upgrade to Agency to use this.';
-      return res.status(403).json({ error: msg });
+      return lockedResponse(res, myBusiness, { kind: 'feature', feature: 'engine_b' });
     }
   }
   const referral = await findOrCreateBusinessReferral(business_id);
@@ -80,10 +78,7 @@ const getMyStats = async (req, res) => {
     const myBusiness = await Business.findById(business_id).select('plan trial_ends_at plan_expires_at').lean();
     const myEffectivePlan = getEffectivePlanSlug(myBusiness);
     if (!(await canUseFeature(myEffectivePlan, 'engine_b'))) {
-      const msg = myEffectivePlan === 'expired'
-        ? 'Your plan has expired \u2014 renew to keep using this.'
-        : 'Referring other businesses isn\u2019t available on your current plan. Upgrade to Agency to use this.';
-      return res.status(403).json({ error: msg });
+      return lockedResponse(res, myBusiness, { kind: 'feature', feature: 'engine_b' });
     }
   }
   const referral = await findOrCreateBusinessReferral(business_id);

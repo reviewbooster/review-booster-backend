@@ -12,6 +12,7 @@ const ReviewRequest = require('../models/ReviewRequest');
 const Business      = require('../models/Business');
 const mongoose      = require('mongoose');
 const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
+const { lockedResponse } = require('../utils/planGate');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
@@ -161,10 +162,7 @@ const getReviewsOverTime = async (req, res) => {
     const myBusiness = await Business.findById(req.user.business_id).select('plan trial_ends_at plan_expires_at').lean();
     const myEffectivePlan = getEffectivePlanSlug(myBusiness);
     if (!(await canUseFeature(myEffectivePlan, 'analytics'))) {
-      const msg = myEffectivePlan === 'expired'
-        ? 'Your plan has expired \u2014 renew to keep using this.'
-        : 'Advanced analytics isn\u2019t available on your current plan. Upgrade to Pro or Agency to use this.';
-      return res.status(403).json({ error: msg });
+      return lockedResponse(res, myBusiness, { kind: 'feature', feature: 'analytics' });
     }
   }
 
