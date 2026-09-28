@@ -16,3 +16,4 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+plan-backup-*.json
