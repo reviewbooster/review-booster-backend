@@ -230,7 +230,12 @@ const getPaymentInfo = async (req, res) => {
 
 // GET /api/admin/plans â€” super_admin, all plans (active + inactive)
 const listPlansAdmin = async (req, res) => {
-  const all = await getOrCreateAllPlans();
+  // Only the four current tiers are editable here. The legacy
+  // trial/basic/agency/expired rows still exist in the database but are
+  // retired -- every business has been migrated off them.
+  const all = (await getOrCreateAllPlans())
+    .filter((p) => PUBLIC_PLAN_ORDER.includes(p.slug))
+    .sort((a, b) => PUBLIC_PLAN_ORDER.indexOf(a.slug) - PUBLIC_PLAN_ORDER.indexOf(b.slug));
   // Overlay the limits the app actually enforces (saved values if the plan
   // was customized, built-in defaults otherwise) so the admin form never
   // prefills blank -- blank means "unlimited", and saving a card with blank
