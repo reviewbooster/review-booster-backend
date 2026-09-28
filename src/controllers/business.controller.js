@@ -180,12 +180,14 @@ const getMySettings = async (req, res) => {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
   const business = await Business.findById(req.user.business_id)
-    .select('name type type_other google_review_url whatsapp_consent_required plan trial_ends_at brand_logo_url created_at message_templates onboarding_completed product_intro_seen product_tour_completed product_tour_started tour_skipped product_features_seen')
+    .select('name type type_other google_review_url whatsapp_consent_required plan plan_expires_at trial_ends_at brand_logo_url created_at message_templates onboarding_completed product_intro_seen product_tour_completed product_tour_started tour_skipped product_features_seen')
     .lean();
   if (!business) {
     return res.status(404).json({ error: 'Business not found.' });
   }
-  res.json({ data: business });
+  // effective_plan = the tier actually in force right now (Growth during a
+  // trial, Free once it ends or a paid plan lapses) -- what the header badge shows.
+  res.json({ data: Object.assign({}, business, { effective_plan: getEffectivePlanSlug(business) }) });
 };
 
 // PATCH /api/business/my-settings - authenticated owner endpoint, no super_admin check
