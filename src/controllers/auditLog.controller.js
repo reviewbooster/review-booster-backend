@@ -270,4 +270,29 @@ const getNeedsAttention = async (req, res) => {
   });
 };
 
-module.exports = { logAction, getAuditLog, getBusinessDetail, getDashboardStats, getNeedsAttention };
+// GET /api/admin/growth-trend -- new businesses per week, real counts from
+// Business.created_at (no separate tracking table, nothing estimated).
+const getGrowthTrend = async (req, res) => {
+  const WEEKS = 8;
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  var day = start.getDay(); // 0 = Sunday
+  var sinceMonday = day === 0 ? 6 : day - 1;
+  start.setDate(start.getDate() - sinceMonday - (WEEKS - 1) * 7);
+
+  const businesses = await Business.find({ created_at: { $gte: start } }).select('created_at').lean();
+
+  const buckets = [];
+  for (let i = 0; i < WEEKS; i++) {
+    buckets.push({ week_start: new Date(start.getTime() + i * 7 * 24 * 60 * 60 * 1000), count: 0 });
+  }
+  businesses.forEach((b) => {
+    const idx = Math.floor((new Date(b.created_at).getTime() - start.getTime()) / (7 * 24 * 60 * 60 * 1000));
+    if (idx >= 0 && idx < WEEKS) buckets[idx].count += 1;
+  });
+
+  res.json({ data: buckets });
+};
+
+module.exports = { logAction, getAuditLog, getBusinessDetail, getDashboardStats, getNeedsAttention, getGrowthTrend };
