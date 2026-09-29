@@ -109,7 +109,7 @@ const listPotential = async (req, res) => {
 
 // GET /api/admin/success-stories/:id
 const getStory = async (req, res) => {
-  const story = await SuccessStory.findById(req.params.id).populate('business_id', 'name type plan').lean();
+  const story = await SuccessStory.findById(req.params.id).populate('business_id', 'name type plan brand_logo_url').lean();
   if (!story) return res.status(404).json({ error: 'Story not found.' });
   res.json({ data: Object.assign({}, story, { row: row(story) }) });
 };
