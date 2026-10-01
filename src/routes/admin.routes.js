@@ -8,6 +8,7 @@ const auditLog = require('../controllers/auditLog.controller');
 const supportChat = require('../controllers/supportChat.controller');
 const adminSuccessStory = require('../controllers/adminSuccessStory.controller');
 const asyncWrap = require('../utils/asyncWrap');
+const adminCommandCenter = require('../controllers/adminCommandCenter.controller');
 
 const router = express.Router();
 
@@ -46,5 +47,8 @@ router.post('/success-stories/invite',    asyncWrap(adminSuccessStory.inviteBusi
 router.get('/success-stories',            asyncWrap(adminSuccessStory.listStories));
 router.get('/success-stories/:id',        asyncWrap(adminSuccessStory.getStory));
 router.patch('/success-stories/:id',      asyncWrap(adminSuccessStory.decideStory));
+
+router.get('/action-center', asyncWrap(adminCommandCenter.getActionCenter));
+router.get('/business-health', asyncWrap(adminCommandCenter.getBusinessHealth));
 
 module.exports = router;
