@@ -13,7 +13,10 @@ const User           = require('../models/User');
 const Customer       = require('../models/Customer');
 const Review         = require('../models/Review');
 const BusinessReferral       = require('../models/BusinessReferral');
+const SuccessStory  = require('../models/SuccessStory');
+const SupportChat   = require('../models/SupportChat');
 const BusinessReferralSignup = require('../models/BusinessReferralSignup');
+const { getEffectivePlanSlug } = require('../utils/planLimits');
 
 // Fire-and-forget on purpose — a logging failure should never break the
 // action it's describing.
@@ -51,6 +54,42 @@ const getAuditLog = async (req, res) => {
 // GET /api/admin/businesses/:id/detail — super_admin
 // Read-only rollup for the admin business list — everything about one
 // business in one place instead of nothing.
+// Thresholds behind the Account Health badge -- named here so they're easy
+// to find and tune. Only real, already-verified signals feed this (the same
+// ones Needs Attention uses): expiry proximity, unresolved feedback volume,
+// and incomplete onboarding. There's no login-tracking or usage-decline data
+// to draw on yet, so those PDF-suggested signals aren't included.
+const HEALTH_EXPIRING_AT_RISK_DAYS = 3;
+const HEALTH_EXPIRING_WATCH_DAYS = 7;
+const HEALTH_UNRESOLVED_AT_RISK = 5;
+const HEALTH_ONBOARDING_STUCK_DAYS = 3;
+
+function computeHealth(business, unresolvedCount, expiryDays) {
+  var reasons = { at_risk: [], needs_attention: [] };
+
+  if (expiryDays !== null) {
+    if (expiryDays <= HEALTH_EXPIRING_AT_RISK_DAYS) {
+      reasons.at_risk.push(expiryDays < 0 ? 'Plan/trial has expired' : 'Plan/trial expires in ' + expiryDays + ' day' + (expiryDays === 1 ? '' : 's'));
+    } else if (expiryDays <= HEALTH_EXPIRING_WATCH_DAYS) {
+      reasons.needs_attention.push('Plan/trial expires in ' + expiryDays + ' days');
+    }
+  }
+
+  if (unresolvedCount > HEALTH_UNRESOLVED_AT_RISK) {
+    reasons.at_risk.push(unresolvedCount + ' unresolved feedback items');
+  } else if (unresolvedCount > 0) {
+    reasons.needs_attention.push(unresolvedCount + ' unresolved feedback item' + (unresolvedCount === 1 ? '' : 's'));
+  }
+
+  var daysSinceSignup = Math.floor((Date.now() - new Date(business.created_at).getTime()) / (24 * 60 * 60 * 1000));
+  if (business.onboarding_completed === false && daysSinceSignup >= HEALTH_ONBOARDING_STUCK_DAYS) {
+    reasons.at_risk.push('Onboarding incomplete (' + daysSinceSignup + ' days since signup)');
+  }
+
+  var status = reasons.at_risk.length ? 'at_risk' : (reasons.needs_attention.length ? 'needs_attention' : 'healthy');
+  return { status: status, reasons: reasons.at_risk.concat(reasons.needs_attention) };
+}
+
 const getBusinessDetail = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -91,9 +130,19 @@ const getBusinessDetail = async (req, res) => {
         plan_expires_at: business.plan_expires_at,
         is_suspended: business.is_suspended,
         created_at: business.created_at,
+        onboarding_completed: business.onboarding_completed,
         referred_by_business_id: business.referred_by_business_id || null,
         referral_discount_used: !!business.referral_discount_used,
       },
+      health: computeHealth(
+        business,
+        unresolvedCount,
+        (function () {
+          var isTrial = business.plan === 'free' || business.plan === 'trial';
+          var expiry = isTrial ? business.trial_ends_at : business.plan_expires_at;
+          return expiry ? Math.ceil((new Date(expiry).getTime() - Date.now()) / (24 * 60 * 60 * 1000)) : null;
+        })()
+      ),
       owner: owner ? { name: owner.name, email: owner.email, joined: owner.created_at } : null,
       customers: customerCount,
       staff_count: staffCount,
@@ -215,8 +264,10 @@ const getDashboardStats = async (req, res) => {
 const getNeedsAttention = async (req, res) => {
   const soon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   const now = new Date();
+  const ONBOARDING_STUCK_DAYS = 3;
+  const stuckSince = new Date(Date.now() - ONBOARDING_STUCK_DAYS * 24 * 60 * 60 * 1000);
 
-  const [expiringBusinesses, unresolvedAgg, pendingCredits] = await Promise.all([
+  const [expiringBusinesses, unresolvedAgg, pendingCredits, pendingStories, stuckOnboarding, supportWaiting] = await Promise.all([
     Business.find({
       is_suspended: false,
       $or: [
@@ -238,6 +289,24 @@ const getNeedsAttention = async (req, res) => {
       .sort({ created_at: 1 })
       .limit(10)
       .lean(),
+
+    SuccessStory.find({ status: { $in: ['submitted', 'under_review'] } })
+      .populate('business_id', 'name')
+      .sort({ submitted_at: 1 })
+      .limit(10)
+      .lean(),
+
+    Business.find({ is_suspended: false, onboarding_completed: false, created_at: { $lte: stuckSince } })
+      .select('name created_at')
+      .sort({ created_at: 1 })
+      .limit(10)
+      .lean(),
+
+    SupportChat.find({ status: 'open', unread_by_admin: true })
+      .select('guest_name last_message_at')
+      .sort({ last_message_at: 1 })
+      .limit(10)
+      .lean(),
   ]);
 
   const unresolvedBusinessIds = unresolvedAgg.map((r) => r._id);
@@ -255,6 +324,22 @@ const getNeedsAttention = async (req, res) => {
         var daysLeft = Math.ceil((new Date(expiryDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
         return { business_id: b._id, business_name: b.name, plan: b.plan, days_left: daysLeft, expiry_date: expiryDate };
       }),
+      pending_stories: pendingStories.map((s) => ({
+        story_id: s._id,
+        business_id: s.business_id ? s.business_id._id : null,
+        business_name: s.business_id ? s.business_id.name : 'Unknown',
+        status: s.status,
+        submitted_at: s.submitted_at,
+      })),
+      stuck_onboarding: stuckOnboarding.map((b) => {
+        var daysStuck = Math.floor((now.getTime() - new Date(b.created_at).getTime()) / (24 * 60 * 60 * 1000));
+        return { business_id: b._id, business_name: b.name, days_since_signup: daysStuck };
+      }),
+      support_waiting: supportWaiting.map((c) => ({
+        chat_id: c._id,
+        guest_name: c.guest_name,
+        last_message_at: c.last_message_at,
+      })),
       unresolved_feedback: unresolvedAgg.map((r) => ({
         business_id: r._id,
         business_name: unresolvedNameMap[String(r._id)] || 'Unknown',
@@ -295,4 +380,54 @@ const getGrowthTrend = async (req, res) => {
   res.json({ data: buckets });
 };
 
-module.exports = { logAction, getAuditLog, getBusinessDetail, getDashboardStats, getNeedsAttention, getGrowthTrend };
+// GET /api/admin/subscriptions -- super_admin
+// Real per-business plan status only. No MRR, no failed-payment tracking --
+// manual UPI billing has no gateway behind it, so there's nothing honest to
+// compute there yet.
+const getSubscriptions = async (req, res) => {
+  const businesses = await Business.find({})
+    .select('name plan plan_expires_at trial_ends_at is_suspended created_at')
+    .lean();
+
+  const now = Date.now();
+  const rows = businesses.map((b) => {
+    const effectivePlan = getEffectivePlanSlug(b);
+    const onTrial = (b.plan === 'free' || b.plan === 'trial') &&
+      b.trial_ends_at && new Date(b.trial_ends_at).getTime() > now;
+    const renewalDate = onTrial ? b.trial_ends_at : b.plan_expires_at;
+    const daysLeft = renewalDate
+      ? Math.ceil((new Date(renewalDate).getTime() - now) / (24 * 60 * 60 * 1000))
+      : null;
+    const status = b.is_suspended ? 'suspended' : (onTrial ? 'trial' : effectivePlan);
+
+    return {
+      business_id: b._id,
+      business_name: b.name,
+      plan: effectivePlan,
+      status: status,
+      on_trial: onTrial,
+      renewal_date: renewalDate,
+      days_left: daysLeft,
+      is_suspended: b.is_suspended,
+      created_at: b.created_at,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (a.days_left == null && b.days_left == null) return 0;
+    if (a.days_left == null) return 1;
+    if (b.days_left == null) return -1;
+    return a.days_left - b.days_left;
+  });
+
+  const counts = { trial: 0, free: 0, starter: 0, growth: 0, pro: 0, suspended: 0 };
+  rows.forEach((r) => {
+    if (r.is_suspended) { counts.suspended += 1; return; }
+    if (r.on_trial) { counts.trial += 1; return; }
+    if (counts[r.plan] !== undefined) counts[r.plan] += 1;
+  });
+
+  res.json({ data: { rows: rows, counts: counts } });
+};
+
+module.exports = { logAction, getAuditLog, getBusinessDetail, getDashboardStats, getNeedsAttention, getGrowthTrend, getSubscriptions };

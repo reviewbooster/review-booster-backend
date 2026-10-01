@@ -33,6 +33,7 @@ router.get('/businesses/:id/detail',        asyncWrap(auditLog.getBusinessDetail
 router.get('/dashboard-stats',              asyncWrap(auditLog.getDashboardStats));
 router.get('/needs-attention',              asyncWrap(auditLog.getNeedsAttention));
 router.get('/growth-trend',                 asyncWrap(auditLog.getGrowthTrend));
+router.get('/subscriptions',                asyncWrap(auditLog.getSubscriptions));
 
 // Support Chats â€” pre-login Help & Support widget, admin side
 router.get('/support-chats',                   asyncWrap(supportChat.listChatsAdmin));
