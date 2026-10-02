@@ -3,12 +3,12 @@
 /**
  * Auth routes
  *  -- 
- * POST /api/auth/signup          -- public self-registration
- * POST /api/auth/register        -- super_admin creates Business + User
- * POST /api/auth/login           -- validates credentials, issues tokens
- * POST /api/auth/refresh         -- rotates refresh token, new access token
- * POST /api/auth/logout          -- clears refresh cookie
- * POST /api/auth/change-password -- forced on first login
+ * POST /api/auth/signup          ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â public self-registration
+ * POST /api/auth/register        ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â super_admin creates Business + User
+ * POST /api/auth/login           ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â validates credentials, issues tokens
+ * POST /api/auth/refresh         ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â rotates refresh token, new access token
+ * POST /api/auth/logout          ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â clears refresh cookie
+ * POST /api/auth/change-password ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â forced on first login
  *  -- 
  */
 
@@ -86,7 +86,7 @@ const clearRefreshCookie = (res) => {
 };
 
 //  -- 
-// Rate limiter -- 5 login attempts per 15 minutes per IP+email
+// Rate limiter ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â 5 login attempts per 15 minutes per IP+email
 // Applied only to POST /auth/login
 //  -- 
 
@@ -106,7 +106,7 @@ const loginLimiter = rateLimit({
 });
 
 //  -- 
-// Rate limiter -- 5 signup attempts per hour per IP
+// Rate limiter ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â 5 signup attempts per hour per IP
 // Applied only to POST /auth/signup
 //  -- 
 
@@ -200,7 +200,7 @@ const signupSchema = Joi.object({
 //  -- 
 /**
  * Super-admin only. Creates a new Business + owner User in one operation.
- * google_review_url is required here -- admin always sets it at registration.
+ * google_review_url is required here ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â admin always sets it at registration.
  */
 router.post(
   '/register',
@@ -297,8 +297,25 @@ router.post(
     }
 
     const code = String(Math.floor(100000 + Math.random() * 900000)).slice(0, OTP_LENGTH);
-    await EmailOtp.create({ email, code_hash: sha256(code) });
-    await sendSignupOtpEmail(email, code);
+    const otpRecord = await EmailOtp.create({ email, code_hash: sha256(code) });
+
+    // The Gmail SMTP connection from Render's free tier is occasionally
+    // slow to establish -- one retry after a short pause clears most
+    // transient timeouts. If it still fails, don't leave an orphaned code
+    // counting against the hourly limit, and say so plainly instead of
+    // falling through to a generic error.
+    try {
+      try {
+        await sendSignupOtpEmail(email, code);
+      } catch (firstErr) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await sendSignupOtpEmail(email, code);
+      }
+    } catch (sendErr) {
+      await EmailOtp.deleteOne({ _id: otpRecord._id });
+      console.error('[signup/request-otp] Email send failed twice:', sendErr.message);
+      return res.status(502).json({ error: 'We could not send the verification email right now. Please try again in a moment.' });
+    }
 
     res.json({ data: { sent: true } });
   })
@@ -359,7 +376,7 @@ router.post(
 
     const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    // Engine B -- resolve an incoming ?ref= code (if any) to the referring
+    // Engine B ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â resolve an incoming ?ref= code (if any) to the referring
     // business before creating this one, so it can be tagged at creation.
     let referringBusinessReferral = null;
     if (ref && ref.trim()) {
@@ -386,7 +403,7 @@ router.post(
         referral_id:           referringBusinessReferral._id,
         referrer_business_id:  referringBusinessReferral.business_id,
         new_business_id:       business._id,
-      }).catch(() => { /* duplicate-key race on the unique new_business_id -- safe to ignore */ });
+      }).catch(() => { /* duplicate-key race on the unique new_business_id ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â safe to ignore */ });
     }
 
 

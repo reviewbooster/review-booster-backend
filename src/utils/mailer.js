@@ -21,9 +21,12 @@ function createTransporter() {
       pass: process.env.SMTP_PASS,
     },
     family:            4,
-    connectionTimeout: 8000,
-    greetingTimeout:   8000,
-    socketTimeout:     10000,
+    // Render's free-tier outbound network latency is variable -- 8s was
+    // tight enough to cause intermittent ETIMEDOUT failures even on a
+    // perfectly fine connection. Loosened across the board.
+    connectionTimeout: 12000,
+    greetingTimeout:   12000,
+    socketTimeout:     15000,
   });
 }
 
