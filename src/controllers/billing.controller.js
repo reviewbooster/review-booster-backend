@@ -12,8 +12,10 @@ const PlatformBillingSettings = require('../models/PlatformBillingSettings');
 const BusinessReferralSettings = require('../models/BusinessReferralSettings');
 const { logAction } = require('./auditLog.controller');
 const Customer = require('../models/Customer');
+const User = require('../models/User');
 const { clearPlanLimitsCache, FEATURE_LABELS, getEffectivePlanSlug, getPlanLimits, setTrialPlanCache } = require('../utils/planLimits');
 const { getUsageCount, getReviewRequestCount } = require('../utils/usageMeter');
+const { sendPlanActivatedEmail } = require('../utils/mailer');
 
 const PLAN_DEFAULTS = {
   trial:   { name: 'Trial',   sort: 0 },
@@ -389,6 +391,18 @@ const activateBusinessPlan = async (req, res) => {
     target_label: business.name,
     metadata: { plan, days: numDays },
   });
+
+  // Best-effort confirmation email -- real paid activations only (a trial
+  // extension isn't a purchase, so it doesn't get a "plan activated" email).
+  // Never block or fail the activation itself if this has an issue.
+  if (plan !== 'trial') {
+    User.findOne({ business_id: business._id, role: 'owner' }).select('name email').lean()
+      .then((owner) => {
+        if (!owner) return;
+        return sendPlanActivatedEmail(owner.email, owner.name, business.name, plan, numDays);
+      })
+      .catch(() => { /* non-critical -- activation itself already succeeded */ });
+  }
 
   res.json({
     data: {

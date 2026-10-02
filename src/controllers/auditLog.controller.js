@@ -8,14 +8,15 @@
  */
 const mongoose      = require('mongoose');
 const AuditLog       = require('../models/AuditLog');
+const ReviewRequest  = require('../models/ReviewRequest');
 const Business       = require('../models/Business');
 const User           = require('../models/User');
 const Customer       = require('../models/Customer');
 const Review         = require('../models/Review');
 const BusinessReferral       = require('../models/BusinessReferral');
+const BusinessReferralSignup = require('../models/BusinessReferralSignup');
 const SuccessStory  = require('../models/SuccessStory');
 const SupportChat   = require('../models/SupportChat');
-const BusinessReferralSignup = require('../models/BusinessReferralSignup');
 const { getEffectivePlanSlug } = require('../utils/planLimits');
 
 // Fire-and-forget on purpose — a logging failure should never break the
@@ -54,11 +55,6 @@ const getAuditLog = async (req, res) => {
 // GET /api/admin/businesses/:id/detail — super_admin
 // Read-only rollup for the admin business list — everything about one
 // business in one place instead of nothing.
-// Thresholds behind the Account Health badge -- named here so they're easy
-// to find and tune. Only real, already-verified signals feed this (the same
-// ones Needs Attention uses): expiry proximity, unresolved feedback volume,
-// and incomplete onboarding. There's no login-tracking or usage-decline data
-// to draw on yet, so those PDF-suggested signals aren't included.
 const HEALTH_EXPIRING_AT_RISK_DAYS = 3;
 const HEALTH_EXPIRING_WATCH_DAYS = 7;
 const HEALTH_UNRESOLVED_AT_RISK = 5;
@@ -266,8 +262,10 @@ const getNeedsAttention = async (req, res) => {
   const now = new Date();
   const ONBOARDING_STUCK_DAYS = 3;
   const stuckSince = new Date(Date.now() - ONBOARDING_STUCK_DAYS * 24 * 60 * 60 * 1000);
+  const POTENTIAL_MIN_REVIEW_GAIN = 10;
+  const POTENTIAL_MIN_RATING_GAIN = 0.2;
 
-  const [expiringBusinesses, unresolvedAgg, pendingCredits, pendingStories, stuckOnboarding, supportWaiting] = await Promise.all([
+  const [expiringBusinesses, unresolvedAgg, pendingCredits, pendingStories, stuckOnboarding, supportWaiting, potentialCandidates, existingStoryBusinessIds] = await Promise.all([
     Business.find({
       is_suspended: false,
       $or: [
@@ -307,7 +305,31 @@ const getNeedsAttention = async (req, res) => {
       .sort({ last_message_at: 1 })
       .limit(10)
       .lean(),
+
+    Business.find({
+      'google_numbers.baseline.review_count': { $ne: null },
+      'google_numbers.updates.0': { $exists: true },
+      is_suspended: false,
+    }).select('google_numbers').limit(500).lean(),
+
+    SuccessStory.find({}).select('business_id').lean(),
   ]);
+
+  const haveStory = {};
+  existingStoryBusinessIds.forEach((s) => { haveStory[String(s.business_id)] = true; });
+  var potentialCount = 0;
+  potentialCandidates.forEach((b) => {
+    if (haveStory[String(b._id)]) return;
+    const base = b.google_numbers.baseline;
+    const ups = b.google_numbers.updates || [];
+    const cur = ups[ups.length - 1];
+    if (!base || !cur) return;
+    const gain = cur.review_count - base.review_count;
+    const ratingGain = (cur.rating != null && base.rating != null) ? Math.round((cur.rating - base.rating) * 10) / 10 : null;
+    if (gain >= POTENTIAL_MIN_REVIEW_GAIN || (ratingGain !== null && ratingGain >= POTENTIAL_MIN_RATING_GAIN)) {
+      potentialCount += 1;
+    }
+  });
 
   const unresolvedBusinessIds = unresolvedAgg.map((r) => r._id);
   const unresolvedBusinesses = unresolvedBusinessIds.length
@@ -340,6 +362,7 @@ const getNeedsAttention = async (req, res) => {
         guest_name: c.guest_name,
         last_message_at: c.last_message_at,
       })),
+      potential_stories_count: potentialCount,
       unresolved_feedback: unresolvedAgg.map((r) => ({
         business_id: r._id,
         business_name: unresolvedNameMap[String(r._id)] || 'Unknown',
@@ -381,9 +404,6 @@ const getGrowthTrend = async (req, res) => {
 };
 
 // GET /api/admin/subscriptions -- super_admin
-// Real per-business plan status only. No MRR, no failed-payment tracking --
-// manual UPI billing has no gateway behind it, so there's nothing honest to
-// compute there yet.
 const getSubscriptions = async (req, res) => {
   const businesses = await Business.find({})
     .select('name plan plan_expires_at trial_ends_at is_suspended created_at')
@@ -430,4 +450,161 @@ const getSubscriptions = async (req, res) => {
   res.json({ data: { rows: rows, counts: counts } });
 };
 
-module.exports = { logAction, getAuditLog, getBusinessDetail, getDashboardStats, getNeedsAttention, getGrowthTrend, getSubscriptions };
+const getBusinessHealthOverview = async (req, res) => {
+  const businesses = await Business.find({})
+    .select('name plan plan_expires_at trial_ends_at onboarding_completed created_at is_suspended')
+    .lean();
+
+  const unresolvedAgg2 = await Review.aggregate([
+    { $match: { is_public: false, resolved: false } },
+    { $group: { _id: '$business_id', count: { $sum: 1 } } },
+  ]);
+  const unresolvedMap2 = {};
+  unresolvedAgg2.forEach((r) => { unresolvedMap2[String(r._id)] = r.count; });
+
+  const now2 = Date.now();
+  const rows2 = businesses
+    .filter((b) => !b.is_suspended)
+    .map((b) => {
+      const isTrial = b.plan === 'free' || b.plan === 'trial';
+      const expiry = isTrial ? b.trial_ends_at : b.plan_expires_at;
+      const expiryDays = expiry ? Math.ceil((new Date(expiry).getTime() - now2) / (24 * 60 * 60 * 1000)) : null;
+      const unresolvedCount = unresolvedMap2[String(b._id)] || 0;
+      const health = computeHealth(b, unresolvedCount, expiryDays);
+      return {
+        business_id: b._id,
+        business_name: b.name,
+        status: health.status,
+        reasons: health.reasons,
+      };
+    });
+
+  const counts2 = { healthy: 0, needs_attention: 0, at_risk: 0 };
+  rows2.forEach((r) => { counts2[r.status] += 1; });
+
+  const atRisk = rows2
+    .filter((r) => r.status === 'at_risk')
+    .sort((a, b) => a.business_name.localeCompare(b.business_name));
+  const needsAttention2 = rows2
+    .filter((r) => r.status === 'needs_attention')
+    .sort((a, b) => a.business_name.localeCompare(b.business_name));
+
+  res.json({ data: { counts: counts2, at_risk: atRisk, needs_attention: needsAttention2 } });
+};
+
+// GET /api/admin/global-search?q=... -- super_admin
+// Real text search across businesses, owners, support chats, and audit
+// log entries. Note: audit logging isn't wired into every admin action yet
+// (only billing and referral actions currently call logAction), so audit
+// results reflect what's actually been logged, not a complete history.
+const globalSearch = async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) {
+    return res.json({ data: { businesses: [], owners: [], support_chats: [], audit_log: [] } });
+  }
+  const escaped = q.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+  const rx = new RegExp(escaped, 'i');
+
+  const [businesses, owners, chats, logs] = await Promise.all([
+    Business.find({ name: rx }).select('name type plan').limit(8).lean(),
+    User.find({ role: 'owner', $or: [{ name: rx }, { email: rx }] })
+      .select('name email business_id').populate('business_id', 'name').limit(8).lean(),
+    SupportChat.find({ $or: [{ guest_name: rx }, { guest_email: rx }] })
+      .select('guest_name guest_email status last_message_at').limit(8).lean(),
+    AuditLog.find({ $or: [{ action: rx }, { target_label: rx }, { actor_name: rx }] })
+      .select('action target_type target_id target_label actor_name created_at')
+      .sort({ created_at: -1 }).limit(8).lean(),
+  ]);
+
+  res.json({
+    data: {
+      businesses: businesses.map((b) => ({ business_id: b._id, name: b.name, type: b.type, plan: b.plan })),
+      owners: owners.map((o) => ({
+        user_id: o._id,
+        name: o.name,
+        email: o.email,
+        business_id: o.business_id ? o.business_id._id : null,
+        business_name: o.business_id ? o.business_id.name : null,
+      })),
+      support_chats: chats.map((c) => ({
+        chat_id: c._id, guest_name: c.guest_name, guest_email: c.guest_email,
+        status: c.status, last_message_at: c.last_message_at,
+      })),
+      audit_log: logs.map((l) => ({
+        log_id: l._id, action: l.action, target_type: l.target_type,
+        target_id: l.target_id, target_label: l.target_label,
+        actor_name: l.actor_name, created_at: l.created_at,
+      })),
+    },
+  });
+};
+
+// GET /api/admin/analytics -- super_admin
+// Platform-wide review performance, sliced three honest ways. No fabricated
+// engagement scores, no revenue -- just real counts and real ratings.
+const MIN_REVIEWS_FOR_RANKING = 5;
+
+const getPlatformAnalytics = async (req, res) => {
+  const WEEKS = 8;
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  var day = start.getDay();
+  var sinceMonday = day === 0 ? 6 : day - 1;
+  start.setDate(start.getDate() - sinceMonday - (WEEKS - 1) * 7);
+
+  const [reviewsInRange, ratingAgg, channelAgg] = await Promise.all([
+    Review.find({ created_at: { $gte: start } }).select('created_at is_public').lean(),
+
+    Review.aggregate([
+      { $group: { _id: '$business_id', avg_rating: { $avg: '$rating' }, count: { $sum: 1 } } },
+      { $match: { count: { $gte: MIN_REVIEWS_FOR_RANKING } } },
+    ]),
+
+    ReviewRequest.aggregate([
+      { $group: { _id: '$channel', count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  // Weekly review trend (public vs private), same bucket pattern as growth-trend.
+  const buckets = [];
+  for (let i = 0; i < WEEKS; i++) {
+    buckets.push({ week_start: new Date(start.getTime() + i * 7 * 24 * 60 * 60 * 1000), public_count: 0, private_count: 0 });
+  }
+  reviewsInRange.forEach((r) => {
+    const idx = Math.floor((new Date(r.created_at).getTime() - start.getTime()) / (7 * 24 * 60 * 60 * 1000));
+    if (idx >= 0 && idx < WEEKS) {
+      if (r.is_public) buckets[idx].public_count += 1;
+      else buckets[idx].private_count += 1;
+    }
+  });
+
+  // Top/bottom businesses by average rating (min review count so one new
+  // business with a single bad review doesn't rank unfairly).
+  const sorted = ratingAgg
+    .map((r) => ({ business_id: r._id, avg_rating: Math.round(r.avg_rating * 10) / 10, count: r.count }))
+    .sort((a, b) => b.avg_rating - a.avg_rating);
+  const topIds = sorted.slice(0, 5);
+  const bottomIds = sorted.length > 5 ? sorted.slice(-5).reverse() : [];
+
+  const allIds = topIds.concat(bottomIds).map((r) => r.business_id);
+  const names = allIds.length
+    ? await Business.find({ _id: { $in: allIds } }).select('name').lean()
+    : [];
+  const nameMap = {};
+  names.forEach((b) => { nameMap[String(b._id)] = b.name; });
+
+  const attachNames = (rows) => rows.map((r) => ({ ...r, business_name: nameMap[String(r.business_id)] || 'Unknown' }));
+
+  res.json({
+    data: {
+      review_trend: buckets,
+      top_businesses: attachNames(topIds),
+      bottom_businesses: attachNames(bottomIds),
+      ranking_min_reviews: MIN_REVIEWS_FOR_RANKING,
+      channel_breakdown: channelAgg.map((c) => ({ channel: c._id || 'unknown', count: c.count })),
+    },
+  });
+};
+
+module.exports = { logAction, getAuditLog, getBusinessDetail, getDashboardStats, getNeedsAttention, getGrowthTrend, getSubscriptions, getBusinessHealthOverview, globalSearch, getPlatformAnalytics };

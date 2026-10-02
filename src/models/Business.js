@@ -36,6 +36,14 @@ const BusinessSchema = new Schema(
       default: null,
       trim: true,
     },
+    // Owner's contact number, collected at signup (format validated by Joi
+    // on the way in). Also what the super admin calls/WhatsApps from
+    // Business 360 -- one field serves both.
+    phone: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     // Trial-Free rework: every business's `plan` is always one of the four
     // real, permanent tiers -- 'trial'/'agency' are legacy values kept only
     // for any business not yet migrated (see migrate-plans-to-new-tiers.js

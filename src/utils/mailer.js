@@ -164,4 +164,58 @@ const sendNewSignupNotification = async (ownerName, businessName, businessType, 
   });
 };
 
-module.exports = { sendPasswordResetEmail, sendApprovalEmail, sendRejectionEmail, sendFeedbackAlertEmail, sendSupportReplyEmail, sendNewSignupNotification };
+const sendReferralCreditedEmail = async (toEmail, ownerName, newBusinessName, rewardText) => {
+  const transporter = createTransporter();
+  const dashboardUrl = (process.env.FRONTEND_URL || '') + '/dashboard/settings/billing';
+  await transporter.sendMail({
+    from:    '"ReviewBooster" <' + process.env.SMTP_USER + '>',
+    to:      toEmail,
+    subject: 'Your referral credit has been applied',
+    html:
+      '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">' +
+      '<h2 style="color:#7c3aed">Thanks for the referral, ' + escapeHtml(ownerName) + '!</h2>' +
+      '<p><strong>' + escapeHtml(newBusinessName) + '</strong> signed up using your referral, and your reward has been applied to your account.</p>' +
+      (rewardText ? '<p style="background:#f9fafb;border-radius:8px;padding:12px;color:#374151">' + escapeHtml(rewardText) + '</p>' : '') +
+      '<p style="margin:24px 0"><a href="' + dashboardUrl + '" style="display:inline-block;padding:12px 28px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">View Billing</a></p>' +
+      '<p style="color:#888;font-size:13px">Powered by Adcend</p>' +
+      '</div>',
+  });
+};
+
+const sendPlanActivatedEmail = async (toEmail, ownerName, businessName, planName, days) => {
+  const transporter = createTransporter();
+  const dashboardUrl = (process.env.FRONTEND_URL || '') + '/dashboard/settings/billing';
+  await transporter.sendMail({
+    from:    '"ReviewBooster" <' + process.env.SMTP_USER + '>',
+    to:      toEmail,
+    subject: 'Your ' + planName + ' plan is now active',
+    html:
+      '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">' +
+      '<h2 style="color:#7c3aed">You\'re on ' + escapeHtml(planName) + ', ' + escapeHtml(ownerName) + '!</h2>' +
+      '<p>Your ReviewBooster plan for <strong>' + escapeHtml(businessName) + '</strong> has been activated for ' + days + ' days.</p>' +
+      '<p style="margin:24px 0"><a href="' + dashboardUrl + '" style="display:inline-block;padding:12px 28px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">View Billing</a></p>' +
+      '<p style="color:#888;font-size:13px">Powered by Adcend</p>' +
+      '</div>',
+  });
+};
+
+const sendSignupOtpEmail = async (toEmail, code) => {
+  const transporter = createTransporter();
+  await transporter.sendMail({
+    from:    '"ReviewBooster" <' + process.env.SMTP_USER + '>',
+    to:      toEmail,
+    subject: 'Your ReviewBooster verification code',
+    html:
+      '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">' +
+      '<h2 style="color:#7c3aed">Verify your email</h2>' +
+      '<p>Enter this code to finish creating your ReviewBooster account:</p>' +
+      '<p style="margin:24px 0;text-align:center">' +
+      '<span style="display:inline-block;padding:14px 28px;background:#f9fafb;border-radius:8px;font-size:32px;font-weight:bold;letter-spacing:8px;color:#1f2937">' + escapeHtml(code) + '</span>' +
+      '</p>' +
+      '<p style="color:#6b7280;font-size:13px">This code expires in 10 minutes. If you didn\'t request this, you can ignore this email.</p>' +
+      '<p style="color:#888;font-size:13px">Powered by Adcend</p>' +
+      '</div>',
+  });
+};
+
+module.exports = { sendPasswordResetEmail, sendApprovalEmail, sendRejectionEmail, sendFeedbackAlertEmail, sendSupportReplyEmail, sendNewSignupNotification, sendReferralCreditedEmail, sendPlanActivatedEmail, sendSignupOtpEmail };

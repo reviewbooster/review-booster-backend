@@ -4,6 +4,7 @@ const auth      = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
 const billing   = require('../controllers/billing.controller');
 const businessReferral = require('../controllers/businessReferral.controller');
+const tasks = require('../controllers/tasks.controller');
 const auditLog = require('../controllers/auditLog.controller');
 const supportChat = require('../controllers/supportChat.controller');
 const adminSuccessStory = require('../controllers/adminSuccessStory.controller');
@@ -33,7 +34,14 @@ router.get('/businesses/:id/detail',        asyncWrap(auditLog.getBusinessDetail
 router.get('/dashboard-stats',              asyncWrap(auditLog.getDashboardStats));
 router.get('/needs-attention',              asyncWrap(auditLog.getNeedsAttention));
 router.get('/growth-trend',                 asyncWrap(auditLog.getGrowthTrend));
+router.get('/global-search',                asyncWrap(auditLog.globalSearch));
+router.get('/analytics',                    asyncWrap(auditLog.getPlatformAnalytics));
+router.get('/tasks',                        asyncWrap(tasks.listTasks));
+router.post('/tasks',                       asyncWrap(tasks.createTask));
+router.patch('/tasks/:id',                  asyncWrap(tasks.updateTask));
+router.delete('/tasks/:id',                 asyncWrap(tasks.deleteTask));
 router.get('/subscriptions',                asyncWrap(auditLog.getSubscriptions));
+router.get('/business-health',              asyncWrap(auditLog.getBusinessHealthOverview));
 
 // Support Chats â€” pre-login Help & Support widget, admin side
 router.get('/support-chats',                   asyncWrap(supportChat.listChatsAdmin));

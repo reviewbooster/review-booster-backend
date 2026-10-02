@@ -8,12 +8,14 @@
  */
 const nodeCrypto             = require('crypto');
 const Business                = require('../models/Business');
+const User                    = require('../models/User');
 const BusinessReferral        = require('../models/BusinessReferral');
 const BusinessReferralSignup  = require('../models/BusinessReferralSignup');
 const BusinessReferralSettings = require('../models/BusinessReferralSettings');
 const { logAction } = require('./auditLog.controller');
 const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 const { lockedResponse } = require('../utils/planGate');
+const { sendReferralCreditedEmail } = require('../utils/mailer');
 
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 function generateShortCode() {
@@ -208,7 +210,7 @@ const markCreditedAdmin = async (req, res) => {
     req.params.id,
     { $set: { credited: true, credited_at: new Date() } },
     { new: true }
-  ).populate('referrer_business_id', 'name');
+  ).populate('referrer_business_id', 'name').populate('new_business_id', 'name');
   if (!signup) {
     return res.status(404).json({ error: 'Referral signup not found.' });
   }
@@ -218,6 +220,24 @@ const markCreditedAdmin = async (req, res) => {
     target_id: signup._id,
     target_label: signup.referrer_business_id ? signup.referrer_business_id.name : null,
   });
+
+  // Best-effort notification to the referring business's owner -- never
+  // block or fail the credit action if the email has an issue.
+  if (signup.referrer_business_id) {
+    User.findOne({ business_id: signup.referrer_business_id._id, role: 'owner' }).select('name email').lean()
+      .then(async (owner) => {
+        if (!owner) return;
+        const settings = await getOrDefaultSettings();
+        return sendReferralCreditedEmail(
+          owner.email,
+          owner.name,
+          signup.new_business_id ? signup.new_business_id.name : 'A new business',
+          settings.referrer_reward_text
+        );
+      })
+      .catch(() => { /* non-critical -- credit itself already succeeded */ });
+  }
+
   res.json({ data: { credited: signup.credited, credited_at: signup.credited_at } });
 };
 
