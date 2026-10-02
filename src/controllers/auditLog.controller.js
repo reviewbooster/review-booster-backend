@@ -122,6 +122,7 @@ const getBusinessDetail = async (req, res) => {
         name: business.name,
         type: business.type,
         plan: business.plan,
+        phone: business.phone || null,
         trial_ends_at: business.trial_ends_at,
         plan_expires_at: business.plan_expires_at,
         is_suspended: business.is_suspended,

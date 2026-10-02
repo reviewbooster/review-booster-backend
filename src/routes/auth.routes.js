@@ -25,11 +25,10 @@ const Business = require('../models/Business');
 const BusinessReferral = require('../models/BusinessReferral');
 const BusinessReferralSignup = require('../models/BusinessReferralSignup');
 const PlatformBillingSettings = require('../models/PlatformBillingSettings');
-const EmailOtp = require('../models/EmailOtp');
 const auth     = require('../middleware/auth');
 const roleGuard = require('../middleware/roleGuard');
 const { asyncWrap } = require('../middleware/errorHandler');
-const { sendPasswordResetEmail, sendNewSignupNotification, sendSignupOtpEmail } = require('../utils/mailer');
+const { sendPasswordResetEmail, sendNewSignupNotification } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -120,33 +119,6 @@ const signupLimiter = rateLimit({
   },
 });
 
-//  --
-// Signup email verification -- a one-time code, checked only at signup.
-// Per email address: 3 wrong tries locks that code for 15 minutes; a code
-// is valid for 10 minutes; at most 1 new code every 60 seconds and 5 per
-// hour. The IP-based limiter below is a looser second layer on top of that.
-//  --
-const OTP_LENGTH               = 6;
-const OTP_EXPIRY_MINUTES       = 10;
-const OTP_MAX_ATTEMPTS         = 3;
-const OTP_LOCK_MINUTES         = 15;
-const OTP_RESEND_COOLDOWN_SECS = 60;
-const OTP_MAX_PER_HOUR         = 5;
-
-const otpRequestLimiter = rateLimit({
-  windowMs:        60 * 60 * 1000,
-  max:             10,
-  standardHeaders: true,
-  legacyHeaders:   false,
-  message: {
-    error: 'Too many verification codes requested from this network. Please try again later.',
-  },
-});
-
-const otpRequestSchema = Joi.object({
-  email: Joi.string().email().required(),
-});
-
 //  -- 
 // Joi validation schemas
 //  -- 
@@ -191,8 +163,6 @@ const signupSchema = Joi.object({
                        .messages({ 'any.only': 'Passwords do not match.' }),
   google_review_url: Joi.string().uri().optional().allow('', null),
   ref:                Joi.string().trim().max(20).optional().allow('', null),
-  otp_code:          Joi.string().length(6).pattern(/^\d+$/).required()
-                       .messages({ 'string.pattern.base': 'Enter the 6-digit code we emailed you.' }),
 });
 
 //  -- 
@@ -261,72 +231,12 @@ router.post(
   })
 );
 
-//  --
-// POST /auth/signup/request-otp
-//  --
-/**
- * Sends (or resends) a 6-digit email verification code. Doesn't create
- * anything yet -- just proves the email address is real and reachable
- * before the account exists.
- */
-router.post(
-  '/signup/request-otp',
-  otpRequestLimiter,
-  asyncWrap(async (req, res) => {
-    const { error, value } = otpRequestSchema.validate(req.body, { stripUnknown: true });
-    if (error) return res.status(400).json({ error: error.details[0].message });
-
-    const email = value.email.toLowerCase().trim();
-
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(409).json({ error: 'An account with that email already exists.' });
-    }
-
-    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const [recentCount, mostRecent] = await Promise.all([
-      EmailOtp.countDocuments({ email, created_at: { $gte: hourAgo } }),
-      EmailOtp.findOne({ email }).sort({ created_at: -1 }).lean(),
-    ]);
-
-    if (recentCount >= OTP_MAX_PER_HOUR) {
-      return res.status(429).json({ error: 'Too many codes requested for this email. Please try again in an hour.' });
-    }
-    if (mostRecent && Date.now() - new Date(mostRecent.created_at).getTime() < OTP_RESEND_COOLDOWN_SECS * 1000) {
-      return res.status(429).json({ error: 'Please wait a moment before requesting another code.' });
-    }
-
-    const code = String(Math.floor(100000 + Math.random() * 900000)).slice(0, OTP_LENGTH);
-    const otpRecord = await EmailOtp.create({ email, code_hash: sha256(code) });
-
-    // The Gmail SMTP connection from Render's free tier is occasionally
-    // slow to establish -- one retry after a short pause clears most
-    // transient timeouts. If it still fails, don't leave an orphaned code
-    // counting against the hourly limit, and say so plainly instead of
-    // falling through to a generic error.
-    try {
-      try {
-        await sendSignupOtpEmail(email, code);
-      } catch (firstErr) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        await sendSignupOtpEmail(email, code);
-      }
-    } catch (sendErr) {
-      await EmailOtp.deleteOne({ _id: otpRecord._id });
-      console.error('[signup/request-otp] Email send failed twice:', sendErr.message);
-      return res.status(502).json({ error: 'We could not send the verification email right now. Please try again in a moment.' });
-    }
-
-    res.json({ data: { sent: true } });
-  })
-);
-
 //  -- 
 // POST /auth/signup
 //  -- 
 /**
- * Public self-registration. Creates Business + owner User, after checking
- * the emailed verification code. Rate-limited to 5 signups per hour per IP.
+ * Public self-registration. Creates Business + owner User.
+ * Rate-limited to 5 signups per hour per IP.
  * Sets must_change_password: false -- user chose their own password.
  * google_review_url is optional -- can be added later in Settings.
  */
@@ -340,39 +250,12 @@ router.post(
     });
     if (error) return res.status(400).json({ error: error.details[0].message });
 
-    const { business_name, business_type, business_type_other, owner_name, email, phone, password, google_review_url, ref, otp_code } = value;
+    const { business_name, business_type, business_type_other, owner_name, email, phone, password, google_review_url, ref } = value;
 
     const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
     if (existingUser) {
       return res.status(409).json({ error: 'An account with that email already exists.' });
     }
-
-    // Verify the emailed code before creating anything.
-    const otpRecord = await EmailOtp.findOne({ email: email.toLowerCase().trim(), verified: false }).sort({ created_at: -1 });
-    if (!otpRecord) {
-      return res.status(400).json({ error: 'Enter the verification code we emailed you, or request a new one.' });
-    }
-    if (otpRecord.locked_until && new Date(otpRecord.locked_until) > new Date()) {
-      const minsLeft = Math.ceil((new Date(otpRecord.locked_until).getTime() - Date.now()) / 60000);
-      return res.status(429).json({ error: 'Too many incorrect attempts. Try again in ' + minsLeft + ' minute' + (minsLeft === 1 ? '' : 's') + '.' });
-    }
-    const codeAge = Date.now() - new Date(otpRecord.created_at).getTime();
-    if (codeAge > OTP_EXPIRY_MINUTES * 60 * 1000) {
-      return res.status(400).json({ error: 'This code has expired. Request a new one.' });
-    }
-    if (otpRecord.code_hash !== sha256(otp_code)) {
-      otpRecord.attempts += 1;
-      if (otpRecord.attempts >= OTP_MAX_ATTEMPTS) {
-        otpRecord.locked_until = new Date(Date.now() + OTP_LOCK_MINUTES * 60 * 1000);
-        await otpRecord.save();
-        return res.status(429).json({ error: 'Too many incorrect attempts. Try again in ' + OTP_LOCK_MINUTES + ' minutes.' });
-      }
-      await otpRecord.save();
-      const left = OTP_MAX_ATTEMPTS - otpRecord.attempts;
-      return res.status(400).json({ error: 'Incorrect code. ' + left + ' attempt' + (left === 1 ? '' : 's') + ' left.' });
-    }
-    otpRecord.verified = true;
-    await otpRecord.save();
 
     const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
