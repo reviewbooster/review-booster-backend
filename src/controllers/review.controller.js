@@ -10,7 +10,7 @@ const Alert  = require('../models/Alert');
 const Business = require('../models/Business');
 const Customer = require('../models/Customer');
 const { generateReply } = require('../utils/replyTemplates');
-const { buildBrandedCsv, sendBrandedPdf } = require('../utils/exportBranding');
+const { buildBrandedCsv, sendBrandedPdf, fetchImageBuffer } = require('../utils/exportBranding');
 const { canUseFeature, getEffectivePlanSlug, getPlanLimits } = require('../utils/planLimits');
 const { lockedResponse } = require('../utils/planGate');
 const { getUsageCount, recordUsage } = require('../utils/usageMeter');
@@ -298,16 +298,26 @@ const exportReviews = async (req, res) => {
   const format = (req.query.format === 'pdf') ? 'pdf' : 'csv';
   var today = new Date().toISOString().slice(0, 10);
 
+  // Business branding -- skipped gracefully for a super_admin viewing
+  // cross-tenant data (no single business to brand for).
+  var business = null;
+  if (req.user.role !== 'super_admin' && req.user.business_id) {
+    business = await Business.findById(req.user.business_id).select('name brand_color brand_logo_url').lean();
+  }
+
   if (format === 'pdf') {
+    var businessLogoBuffer = (business && business.brand_logo_url) ? await fetchImageBuffer(business.brand_logo_url) : null;
     return sendBrandedPdf(res, {
       title: 'Reviews Export',
       header: header,
       rows: rows,
       filename: 'reviews-' + today + '.pdf',
+      business: business,
+      businessLogoBuffer: businessLogoBuffer,
     });
   }
 
-  const csv = buildBrandedCsv('Reviews Export', header, rows);
+  const csv = buildBrandedCsv('Reviews Export', header, rows, business);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="reviews-' + today + '.csv"');
   res.send(csv);
@@ -377,4 +387,84 @@ const setFeedbackNotes = async (req, res) => {
   res.json({ data: review });
 };
 
-module.exports = { listReviews, listPrivateFeedback, listFeedbackTags, getThemeSummary, getCustomerContext, resolveFeedback, exportReviews, generateReplyForReview, setFeedbackStage, markFeedbackSent, setFeedbackNotes };
+// GET /api/reviews/private/export -- private feedback only (1-3 star),
+// never mixed with public Google reviews. Same filters listPrivateFeedback
+// already supports (rating, channel, tag, stage, is_resolved, search,
+// date range), same two-brand CSV/PDF treatment as exportReviews above.
+const exportPrivateFeedback = async (req, res) => {
+  const { rating, channel, search, start_date, end_date, tag, stage, is_resolved } = req.query;
+  const filter = { ...tenantFilter(req.user), is_public: false };
+  if (rating)  filter.rating = parseInt(rating, 10);
+  if (channel) filter.source = channel;
+  if (tag)     filter.tags = tag;
+  if (stage === 'new')         filter.stage = 'new';
+  if (stage === 'in_progress') filter.stage = { $in: ['processing', 'awaiting_confirmation'] };
+  if (is_resolved === 'true')  filter.resolved = true;
+  if (is_resolved === 'false') filter.resolved = false;
+  if (start_date || end_date) {
+    filter.created_at = {};
+    if (start_date) {
+      const s = new Date(start_date); s.setHours(0, 0, 0, 0);
+      filter.created_at.$gte = s;
+    }
+    if (end_date) {
+      const e = new Date(end_date); e.setHours(23, 59, 59, 999);
+      filter.created_at.$lte = e;
+    }
+  }
+
+  let feedback = await Review.find(filter)
+    .sort({ created_at: -1 })
+    .populate('customer_id', 'name phone')
+    .lean();
+
+  if (search) {
+    const q = String(search).toLowerCase();
+    feedback = feedback.filter(function(r) {
+      const name = (r.customer_id && r.customer_id.name) ? r.customer_id.name.toLowerCase() : '';
+      const text = r.feedback_text ? r.feedback_text.toLowerCase() : '';
+      return name.includes(q) || text.includes(q);
+    });
+  }
+
+  const header = ['Date', 'Rating', 'Channel', 'Status', 'Customer Name', 'Phone', 'Feedback', 'Tags', 'Resolved By'];
+  const rows = feedback.map(function(r) {
+    return [
+      r.created_at ? new Date(r.created_at).toLocaleDateString('en-IN') : '',
+      r.rating,
+      r.source || '',
+      r.resolved ? 'Resolved' : 'Unresolved',
+      (r.customer_id && r.customer_id.name) ? r.customer_id.name : 'Anonymous',
+      (r.customer_id && r.customer_id.phone) ? r.customer_id.phone : '',
+      r.feedback_text || '',
+      (r.tags || []).join('; '),
+      r.resolved_by || '',
+    ];
+  });
+  const format = (req.query.format === 'pdf') ? 'pdf' : 'csv';
+  var today = new Date().toISOString().slice(0, 10);
+
+  var business = null;
+  if (req.user.role !== 'super_admin' && req.user.business_id) {
+    business = await Business.findById(req.user.business_id).select('name brand_color brand_logo_url').lean();
+  }
+
+  if (format === 'pdf') {
+    var businessLogoBuffer = (business && business.brand_logo_url) ? await fetchImageBuffer(business.brand_logo_url) : null;
+    return sendBrandedPdf(res, {
+      title: 'Private Feedback Export',
+      header: header,
+      rows: rows,
+      filename: 'private-feedback-' + today + '.pdf',
+      business: business,
+      businessLogoBuffer: businessLogoBuffer,
+    });
+  }
+
+  const csv = buildBrandedCsv('Private Feedback Export', header, rows, business);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="private-feedback-' + today + '.csv"');
+  res.send(csv);
+};
+
+module.exports = { listReviews, listPrivateFeedback, listFeedbackTags, getThemeSummary, getCustomerContext, resolveFeedback, exportReviews, exportPrivateFeedback, generateReplyForReview, setFeedbackStage, markFeedbackSent, setFeedbackNotes };
