@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const express   = require('express');
 const router    = express.Router();
@@ -11,18 +11,18 @@ const { listReviews, listPrivateFeedback, listFeedbackTags, getThemeSummary, get
 
 router.use(auth);
 
-router.get('/export',        roleGuard('owner', 'staff'), asyncWrap(exportReviews));
-router.get('/tags',          roleGuard('owner', 'staff'), asyncWrap(listFeedbackTags));
-router.get('/theme-summary', roleGuard('owner', 'staff'), asyncWrap(getThemeSummary));
-router.get('/private',       roleGuard('owner', 'staff'), validateQuery(listReviewsSchema), asyncWrap(listPrivateFeedback));
-router.get('/private/export', roleGuard('owner', 'staff'), asyncWrap(exportPrivateFeedback));
-router.get('/',               roleGuard('owner', 'staff'), validateQuery(listReviewsSchema), asyncWrap(listReviews));
+router.get('/export',        roleGuard('owner', 'branch_manager'), asyncWrap(exportReviews));
+router.get('/tags',          roleGuard('owner', 'branch_manager'), asyncWrap(listFeedbackTags));
+router.get('/theme-summary', roleGuard('owner', 'branch_manager'), asyncWrap(getThemeSummary));
+router.get('/private',       roleGuard('owner', 'branch_manager'), validateQuery(listReviewsSchema), asyncWrap(listPrivateFeedback));
+router.get('/private/export', roleGuard('owner', 'branch_manager'), asyncWrap(exportPrivateFeedback));
+router.get('/',               roleGuard('owner', 'branch_manager'), validateQuery(listReviewsSchema), asyncWrap(listReviews));
 
-router.get('/:id/customer-context', roleGuard('owner', 'staff'),                             asyncWrap(getCustomerContext));
+router.get('/:id/customer-context', roleGuard('owner', 'branch_manager'),                             asyncWrap(getCustomerContext));
 router.post('/:id/generate-reply', roleGuard('owner'),                                        asyncWrap(generateReplyForReview));
-router.patch('/:id/resolve',       roleGuard('owner', 'staff'),                                 asyncWrap(resolveFeedback));
-router.patch('/:id/stage',         roleGuard('owner', 'staff'),                                 asyncWrap(setFeedbackStage));
-router.patch('/:id/mark-sent',     roleGuard('owner', 'staff'),                                 asyncWrap(markFeedbackSent));
-router.patch('/:id/notes',         roleGuard('owner', 'staff'),                                 asyncWrap(setFeedbackNotes));
+router.patch('/:id/resolve',       roleGuard('owner', 'branch_manager'),                                 asyncWrap(resolveFeedback));
+router.patch('/:id/stage',         roleGuard('owner', 'branch_manager'),                                 asyncWrap(setFeedbackStage));
+router.patch('/:id/mark-sent',     roleGuard('owner', 'branch_manager'),                                 asyncWrap(markFeedbackSent));
+router.patch('/:id/notes',         roleGuard('owner', 'branch_manager'),                                 asyncWrap(setFeedbackNotes));
 
 module.exports = router;

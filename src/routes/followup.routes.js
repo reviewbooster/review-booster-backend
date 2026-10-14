@@ -7,6 +7,6 @@ const { listFollowUps } = require('../controllers/followup.controller');
 
 const router = express.Router();
 
-router.get('/', auth, roleGuard('owner', 'staff'), asyncWrap(listFollowUps));
+router.get('/', auth, roleGuard('owner', 'branch_manager'), asyncWrap(listFollowUps));
 
 module.exports = router;

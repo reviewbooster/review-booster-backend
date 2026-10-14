@@ -40,7 +40,7 @@ const upload = multer({
 
 router.use(auth);
 
-router.get('/',  roleGuard('owner', 'staff'), validateQuery(listCustomersSchema), asyncWrap(listCustomers));
+router.get('/',  roleGuard('owner', 'branch_manager'), validateQuery(listCustomersSchema), asyncWrap(listCustomers));
 
 router.post('/', roleGuard('owner'), validate(createCustomerSchema),     asyncWrap(createCustomer));
 
@@ -53,15 +53,15 @@ router.post('/import',
   asyncWrap(importCustomers)
 );
 
-router.get('/export',        roleGuard('owner', 'staff'), asyncWrap(exportCustomers));
-router.get('/tags',          roleGuard('owner', 'staff'), asyncWrap(getCustomerTags));
-router.get('/:id',           roleGuard('owner', 'staff'), asyncWrap(getCustomer));
-router.get('/:id/requests',  roleGuard('owner', 'staff'), asyncWrap(getCustomerRequests));
-router.get('/:id/reviews',   roleGuard('owner', 'staff'), asyncWrap(getCustomerReviews));
-router.get('/:id/follow-up',           roleGuard('owner', 'staff'), asyncWrap(getNextFollowUp));
-router.put('/:id/follow-up',           roleGuard('owner', 'staff'), asyncWrap(setFollowUp));
-router.post('/:id/follow-up/complete', roleGuard('owner', 'staff'), asyncWrap(completeFollowUp));
-router.delete('/:id/follow-up',        roleGuard('owner', 'staff'), asyncWrap(cancelFollowUp));
+router.get('/export',        roleGuard('owner', 'branch_manager'), asyncWrap(exportCustomers));
+router.get('/tags',          roleGuard('owner', 'branch_manager'), asyncWrap(getCustomerTags));
+router.get('/:id',           roleGuard('owner', 'branch_manager'), asyncWrap(getCustomer));
+router.get('/:id/requests',  roleGuard('owner', 'branch_manager'), asyncWrap(getCustomerRequests));
+router.get('/:id/reviews',   roleGuard('owner', 'branch_manager'), asyncWrap(getCustomerReviews));
+router.get('/:id/follow-up',           roleGuard('owner', 'branch_manager'), asyncWrap(getNextFollowUp));
+router.put('/:id/follow-up',           roleGuard('owner', 'branch_manager'), asyncWrap(setFollowUp));
+router.post('/:id/follow-up/complete', roleGuard('owner', 'branch_manager'), asyncWrap(completeFollowUp));
+router.delete('/:id/follow-up',        roleGuard('owner', 'branch_manager'), asyncWrap(cancelFollowUp));
 router.put('/:id',    roleGuard('owner'), validate(updateCustomerSchema), asyncWrap(updateCustomer));
 router.delete('/:id', roleGuard('owner'), asyncWrap(deleteCustomer));
 

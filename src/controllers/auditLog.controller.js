@@ -108,7 +108,7 @@ const getBusinessDetail = async (req, res) => {
     BusinessReferral.findOne({ business_id: id }).lean(),
     BusinessReferralSignup.countDocuments({ referrer_business_id: id }),
     Review.aggregate([{ $match: { business_id: businessObjId } }, { $group: { _id: null, avg: { $avg: '$rating' } } }]),
-    User.countDocuments({ business_id: id, role: 'staff' }),
+    User.countDocuments({ business_id: id, role: 'branch_manager' }),
   ]);
 
   const totalFeedback = privateFeedbackCount;
