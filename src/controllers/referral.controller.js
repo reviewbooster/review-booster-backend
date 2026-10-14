@@ -4,12 +4,24 @@
  * Engine A referral program.
  *
  * Flow: a customer (A) gets a personal short code. A friend (B) opens A's
- * link and sees a read-only offer page — no online signup. B visits in
+ * link and sees a read-only offer page -- no online signup. B visits in
  * person and shows the code; staff verify it on the "Redeem a Referral"
  * screen, which is the only place attribution actually gets recorded.
  *
  * Self-contained: reads the existing Customer/Business models but never
  * modifies them.
+ *
+ * Branch attribution (Owner Dashboard & Multi-Location spec): the reward
+ * program itself -- threshold, reward text, offer text (ReferralSettings)
+ * -- is one shared, business-wide configuration and is NOT location-aware
+ * here, by design (agreed with Vivek: reward and threshold stay the same
+ * everywhere). What IS branch-specific is the redemption count: each
+ * ReferralSignup now records which location the redemption happened at,
+ * so the Owner Dashboard can show "this many referrals came in through
+ * this branch" per location, the same way Reviews/Analytics already do.
+ * Server-side enforced via the shared utils/locationScope.js helper, not
+ * just a UI filter -- a branch_manager can only redeem for / see counts
+ * from their own assigned location(s).
  */
 const mongoose         = require('mongoose');
 const nodeCrypto      = require('crypto');
@@ -18,14 +30,17 @@ const Referral         = require('../models/Referral');
 const ReferralSignup   = require('../models/ReferralSignup');
 const ReferralSettings = require('../models/ReferralSettings');
 const Business         = require('../models/Business');
+const Location         = require('../models/Location');
+const User             = require('../models/User');
 const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 const { lockedResponse } = require('../utils/planGate');
+const { getLocationScopeFilter } = require('../utils/locationScope');
 
 const E164 = /^\+[1-9]\d{6,14}$/;
 
 // Mongoose does NOT auto-cast plain strings to ObjectId inside aggregate()
 // $match stages (unlike find()/countDocuments()). req.user.business_id comes
-// off the JWT as a plain string, so every aggregate below needs this cast —
+// off the JWT as a plain string, so every aggregate below needs this cast --
 // otherwise the $match silently matches nothing.
 function toObjectId(id) {
   return new mongoose.Types.ObjectId(id);
@@ -56,13 +71,13 @@ async function findOrCreateReferral(business_id, customer_id) {
       if (err.code !== 11000) throw err; // not a duplicate-key race, rethrow
       referral = await Referral.findOne({ business_id, customer_id });
       if (referral) return referral;
-      // else: code collision — loop and try a new one
+      // else: code collision -- loop and try a new one
     }
   }
   throw new Error('Could not generate a unique referral code after several attempts.');
 }
 
-// Case-insensitive code matching — codes created before this fix were
+// Case-insensitive code matching -- codes created before this fix were
 // stored lowercase (old hex format); new ones are uppercase. Match either.
 function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -129,7 +144,46 @@ function parseLegacyContactInfo(text) {
   };
 }
 
-// GET /api/referrals/settings — owner or staff (view-only)
+// Resolves which location a redemption should be attributed to.
+//   owner / super_admin -- must pass a location_id in the body; validated
+//     to actually belong to this business.
+//   branch_manager -- their own location, never client-supplied: uses the
+//     requested location_id only if it's one of their own assigned
+//     locations, otherwise falls back to their first assigned location.
+//     Returns null (not an error) if they have no location assigned yet,
+//     so redemption still works for businesses mid-migration; the caller
+//     decides whether that's acceptable.
+async function resolveRedemptionLocationId(req, business_id) {
+  const requestedId = req.body.location_id;
+
+  if (req.user.role === 'owner' || req.user.role === 'super_admin') {
+    if (!requestedId || !mongoose.Types.ObjectId.isValid(requestedId)) {
+      const err = new Error('location_id is required to record which branch this referral was redeemed at.');
+      err.statusCode = 400;
+      throw err;
+    }
+    const loc = await Location.findOne({ _id: requestedId, business_id }).select('_id').lean();
+    if (!loc) {
+      const err = new Error('That location does not belong to this business.');
+      err.statusCode = 400;
+      throw err;
+    }
+    return loc._id;
+  }
+
+  // branch_manager (or any future non-owner, non-super_admin role).
+  const me = await User.findById(req.user.id).select('location_ids').lean();
+  const myIds = ((me && me.location_ids) || []).map((id) => String(id));
+
+  if (myIds.length === 0) return null;
+
+  if (requestedId && myIds.includes(String(requestedId))) {
+    return requestedId;
+  }
+  return myIds[0];
+}
+
+// GET /api/referrals/settings -- owner or staff (view-only)
 const getMySettings = async (req, res) => {
   const business_id = req.user.business_id;
   if (!business_id) {
@@ -139,7 +193,7 @@ const getMySettings = async (req, res) => {
   res.json({ data: settings });
 };
 
-// PATCH /api/referrals/settings — owner only
+// PATCH /api/referrals/settings -- owner only
 const updateMySettings = async (req, res) => {
   const business_id = req.user.business_id;
   if (!business_id) {
@@ -170,9 +224,9 @@ const updateMySettings = async (req, res) => {
   res.json({ data: settings });
 };
 
-// GET /api/referrals/:code — PUBLIC, no auth
+// GET /api/referrals/:code -- PUBLIC, no auth
 // The read-only landing page a referred friend (B) sees. No customer is
-// created here — this is informational only.
+// created here -- this is informational only.
 const getReferralLanding = async (req, res) => {
   const referral = await Referral.findOne({ code: codeQuery(req.params.code) })
     .populate('business_id', 'name brand_logo_url')
@@ -184,8 +238,10 @@ const getReferralLanding = async (req, res) => {
 
   const settings = await getOrDefaultSettings(referral.business_id._id);
 
-  // Self-check stats for the referrer (A) — since there's no customer login,
+  // Self-check stats for the referrer (A) -- since there's no customer login,
   // their own /ref/:code link doubles as their personal status page.
+  // Deliberately business-wide, not branch-filtered: A's total progress
+  // toward their next reward counts every redemption anywhere.
   const redeemedCount   = await ReferralSignup.countDocuments({ referral_id: referral._id });
   const threshold       = settings.reward_threshold || 3;
   const rewardsEarned   = Math.floor(redeemedCount / threshold);
@@ -215,7 +271,7 @@ const getReferralLanding = async (req, res) => {
   });
 };
 
-// GET /api/referrals/lookup/:code — owner or staff
+// GET /api/referrals/lookup/:code -- owner or staff
 // Step 1 of redemption: confirm the code is real and show who it belongs
 // to before staff enter the new customer's details.
 const lookupReferralCode = async (req, res) => {
@@ -244,9 +300,9 @@ const lookupReferralCode = async (req, res) => {
   });
 };
 
-// POST /api/referrals/redeem — owner or staff
+// POST /api/referrals/redeem -- owner or staff
 // Step 2: staff enter B's details in person. This is the moment
-// attribution is actually recorded.
+// attribution is actually recorded, including which branch it happened at.
 const redeemReferral = async (req, res) => {
   const business_id = req.user.business_id;
   if (!business_id) {
@@ -259,6 +315,13 @@ const redeemReferral = async (req, res) => {
     if (!(await canUseFeature(myEffectivePlan, 'engine_a'))) {
       return lockedResponse(res, myBusiness, { kind: 'feature', feature: 'engine_a' });
     }
+  }
+
+  let locationId;
+  try {
+    locationId = await resolveRedemptionLocationId(req, business_id);
+  } catch (err) {
+    return res.status(err.statusCode || 400).json({ error: err.message });
   }
 
   const { code, name, phone, email, redeemed_by } = req.body;
@@ -296,15 +359,16 @@ const redeemReferral = async (req, res) => {
 
   const isSelfReferral = String(customer._id) === String(referral.customer_id);
   if (!isNew) {
-    return res.status(409).json({ error: 'This person is already an existing customer — not counted as a new referral.' });
+    return res.status(409).json({ error: 'This person is already an existing customer -- not counted as a new referral.' });
   }
   if (isSelfReferral) {
-    return res.status(409).json({ error: 'This code belongs to the same customer — can\u2019t refer themselves.' });
+    return res.status(409).json({ error: 'This code belongs to the same customer -- can’t refer themselves.' });
   }
 
   await ReferralSignup.create({
     referral_id:     referral._id,
     business_id,
+    location_id:     locationId || null,
     new_customer_id: customer._id,
     redeemed_by:     cleanRedeemedBy,
   });
@@ -325,9 +389,11 @@ const redeemReferral = async (req, res) => {
   });
 };
 
-// GET /api/referrals/rewards — owner or staff
+// GET /api/referrals/rewards -- owner or staff
 // Only customers who have crossed a reward milestone they haven't been
-// given yet. Deliberately NOT a full customer list.
+// given yet. Deliberately NOT a full customer list. Rewards themselves are
+// always computed business-wide (the threshold is shared, not per-branch),
+// regardless of any ?location_id= filter.
 const listRewardsEarned = async (req, res) => {
   const business_id = req.user.business_id;
   if (!business_id) {
@@ -361,7 +427,7 @@ const listRewardsEarned = async (req, res) => {
   res.json({ data: rewards, reward_text: settings.reward_text, reward_threshold: settings.reward_threshold });
 };
 
-// POST /api/referrals/rewards/:customer_id/claim — owner only
+// POST /api/referrals/rewards/:customer_id/claim -- owner only
 const markRewardGiven = async (req, res) => {
   const business_id = req.user.business_id;
   if (!business_id) {
@@ -376,7 +442,7 @@ const markRewardGiven = async (req, res) => {
   res.json({ data: { rewards_claimed: referral.rewards_claimed } });
 };
 
-// GET /api/referrals/customer/:customer_id — owner or staff
+// GET /api/referrals/customer/:customer_id -- owner or staff
 // Used by the "Thank + Refer" button on the Reviews page.
 const getCustomerReferral = async (req, res) => {
   const business_id = req.user.business_id;
@@ -398,19 +464,32 @@ const getCustomerReferral = async (req, res) => {
   res.json({ data: { code: referral.code } });
 };
 
-// GET /api/referrals/stats — owner or staff (used by both the Dashboard
+// GET /api/referrals/stats -- owner or staff (used by both the Dashboard
 // summary card and the Referrals page's own stat-card row).
+// Supports ?location_id= (owner/super_admin optional, branch_manager
+// always enforced to their own location) to show branch-specific
+// redemption counts in the Owner Dashboard. Rewards math stays on the
+// unfiltered business-wide totals -- only the activity counts are scoped.
 const getReferralStats = async (req, res) => {
   const business_id = req.user.business_id;
   if (!business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
   const settings = await getOrDefaultSettings(business_id);
-  const totalReferred = await ReferralSignup.countDocuments({ business_id });
+
+  let locationFilter;
+  try {
+    locationFilter = await getLocationScopeFilter(req);
+  } catch (err) {
+    return res.status(err.statusCode || 400).json({ error: err.message });
+  }
+
+  const scopedMatch = { business_id: toObjectId(business_id), ...locationFilter };
+  const totalReferred = await ReferralSignup.countDocuments(scopedMatch);
 
   const referrals = await Referral.find({ business_id }).lean();
   const counts = await ReferralSignup.aggregate([
-    { $match: { business_id: toObjectId(business_id) } },
+    { $match: scopedMatch },
     { $group: { _id: '$referral_id', count: { $sum: 1 } } },
   ]);
   const countMap = {};
@@ -438,17 +517,26 @@ const getReferralStats = async (req, res) => {
   });
 };
 
-// GET /api/referrals/referrers — owner or staff
+// GET /api/referrals/referrers -- owner or staff
 // Every customer who has referred at least one person, with their point
-// total — a plain leaderboard, separate from the "needs action" rewards list.
+// total -- a plain leaderboard, separate from the "needs action" rewards
+// list. Supports the same ?location_id= branch scoping as getReferralStats.
 const listReferrers = async (req, res) => {
   const business_id = req.user.business_id;
   if (!business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
+
+  let locationFilter;
+  try {
+    locationFilter = await getLocationScopeFilter(req);
+  } catch (err) {
+    return res.status(err.statusCode || 400).json({ error: err.message });
+  }
+
   const referrals = await Referral.find({ business_id }).populate('customer_id', 'name').lean();
   const counts = await ReferralSignup.aggregate([
-    { $match: { business_id: toObjectId(business_id) } },
+    { $match: { business_id: toObjectId(business_id), ...locationFilter } },
     { $group: { _id: '$referral_id', count: { $sum: 1 } } },
   ]);
   const countMap = {};
