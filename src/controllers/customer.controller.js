@@ -3,7 +3,18 @@ const { buildBrandedCsv, sendBrandedPdf } = require('../utils/exportBranding');
 /**
  * customer.controller.js
  * Full CRUD for customers + bulk CSV/XLSX import (Session 16).
+ *
+ * Branch scoping (Owner Dashboard & Multi-Location spec, agreed with
+ * Vivek: Option A -- one customer identity, tagged by branch, not
+ * duplicated per branch): every list/read endpoint is scoped through the
+ * shared utils/locationScope.js helper, the same server-side enforcement
+ * already used by analytics/reviews/referrals -- a branch_manager only
+ * ever sees customers tagged to their own assigned location(s); an owner
+ * sees the whole business by default, with an optional ?location_id=
+ * filter. location_id is set ONCE, at creation time, and never
+ * reassigned on a later visit to a different branch.
  */
+const mongoose         = require('mongoose');
 const nodePath        = require('path');
 const { PassThrough } = require('stream');
 const Customer        = require('../models/Customer');
@@ -11,13 +22,44 @@ const ReviewRequest   = require('../models/ReviewRequest');
 const Review          = require('../models/Review');
 const Business        = require('../models/Business');
 const FollowUp        = require('../models/FollowUp');
+const Location         = require('../models/Location');
+const User             = require('../models/User');
 const { getPlanLimits, getEffectivePlanSlug } = require('../utils/planLimits');
 const { lockedResponse } = require('../utils/planGate');
+const { getLocationScopeFilter } = require('../utils/locationScope');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
   return { business_id: user.business_id };
 };
+
+// Resolves which location a newly-created/imported customer should be
+// tagged with. Mirrors referral.controller.js's resolveRedemptionLocationId,
+// but non-blocking: unlike a referral redemption (which must be attributed
+// to record branch-specific counts correctly), adding a customer manually
+// without picking a location just leaves them as "unknown branch" rather
+// than failing the request -- most businesses are still single-location
+// and shouldn't have to think about this.
+//   owner / super_admin -- uses location_id from the request if it's a
+//     real location belonging to this business, else null.
+//   branch_manager -- always their own assigned location (ignores any
+//     client-supplied location_id that isn't actually theirs), or null if
+//     they have no location assigned yet.
+async function resolveActingLocationId(req, business_id) {
+  const requestedId = req.body.location_id || req.query.location_id;
+
+  if (req.user.role === 'owner' || req.user.role === 'super_admin') {
+    if (!requestedId || !mongoose.Types.ObjectId.isValid(requestedId)) return null;
+    const loc = await Location.findOne({ _id: requestedId, business_id }).select('_id').lean();
+    return loc ? loc._id : null;
+  }
+
+  const me = await User.findById(req.user.id).select('location_ids').lean();
+  const myIds = ((me && me.location_ids) || []).map((id) => String(id));
+  if (myIds.length === 0) return null;
+  if (requestedId && myIds.includes(String(requestedId))) return requestedId;
+  return myIds[0];
+}
 
 // Escapes regex special characters in user-supplied search text before
 // it is used in a MongoDB $regex query, preventing malformed/expensive patterns.
@@ -38,6 +80,15 @@ const listCustomers = async (req, res) => {
   const status = req.query.status;
   const dueFollowUp = req.query.due_followup === 'true';
   const filter = tenantFilter(req.user);
+
+  let locationFilter;
+  try {
+    locationFilter = await getLocationScopeFilter(req);
+  } catch (err) {
+    return res.status(err.statusCode || 400).json({ error: err.message });
+  }
+  Object.assign(filter, locationFilter);
+
   if (status === 'active')   filter.opted_out = false;
   if (status === 'inactive') filter.opted_out = true;
   if (tag) filter.tags = tag;
@@ -107,8 +158,11 @@ const createCustomer = async (req, res) => {
   if (existing) {
     return res.status(409).json({ error: 'A customer with this phone or email already exists.' });
   }
+  const businessIdForCreate = req.user.role === 'super_admin' ? req.body.business_id : req.user.business_id;
+  const locationId = await resolveActingLocationId(req, businessIdForCreate);
   const customer = await Customer.create({
-    business_id: req.user.role === 'super_admin' ? req.body.business_id : req.user.business_id,
+    business_id: businessIdForCreate,
+    location_id: locationId || null,
     name,
     phone: phone || null,
     email: email || null,
@@ -117,11 +171,28 @@ const createCustomer = async (req, res) => {
   res.status(201).json({ data: customer });
 };
 
+// Server-side guard so a branch_manager can't read/edit/delete a customer
+// tagged to a branch that isn't theirs by guessing an _id -- same
+// "never leak into another branch's view" rule as everywhere else.
+// Owners/super_admin are unrestricted (no extra filter). Returns null
+// (meaning: deny) rather than throwing, since these callers already
+// respond 404 either way, which also avoids revealing whether the
+// customer exists at all in another branch.
+async function singleCustomerScope(req) {
+  if (req.user.role === 'owner' || req.user.role === 'super_admin') return {};
+  const me = await User.findById(req.user.id).select('location_ids').lean();
+  const myIds = ((me && me.location_ids) || []).map((id) => String(id));
+  if (myIds.length === 0) return { location_id: { $in: [null] } };
+  return { location_id: { $in: [...myIds, null] } };
+}
+
 // GET /api/customers/:id
 const getCustomer = async (req, res) => {
+  const scope = await singleCustomerScope(req);
   const customer = await Customer.findOne({
     _id: req.params.id,
     ...tenantFilter(req.user),
+    ...scope,
   }).select('-__v');
   if (!customer) return res.status(404).json({ error: 'Customer not found.' });
   res.json({ data: customer });
@@ -129,8 +200,9 @@ const getCustomer = async (req, res) => {
 
 // PUT /api/customers/:id
 const updateCustomer = async (req, res) => {
+  const scope = await singleCustomerScope(req);
   const customer = await Customer.findOneAndUpdate(
-    { _id: req.params.id, ...tenantFilter(req.user) },
+    { _id: req.params.id, ...tenantFilter(req.user), ...scope },
     { $set: req.body },
     { new: true, runValidators: true }
   ).select('-__v');
@@ -140,9 +212,11 @@ const updateCustomer = async (req, res) => {
 
 // DELETE /api/customers/:id
 const deleteCustomer = async (req, res) => {
+  const scope = await singleCustomerScope(req);
   const customer = await Customer.findOneAndDelete({
     _id: req.params.id,
     ...tenantFilter(req.user),
+    ...scope,
   });
   if (!customer) return res.status(404).json({ error: 'Customer not found.' });
   await ReviewRequest.deleteMany({
@@ -295,10 +369,16 @@ const importCustomers = async (req, res) => {
     }
   }
 
-  //  --  Bulk insert  -- 
+  //  --  Bulk insert  --
+  // The whole imported batch gets tagged with one location (whichever
+  // branch the person running the import is acting from), same rule as a
+  // single manual add -- not inferred per-row, since a CSV has no branch
+  // column.
+  const importLocationId = await resolveActingLocationId(req, businessId);
   let created = 0;
   if (toCreate.length > 0) {
-    const inserted = await Customer.insertMany(toCreate, { ordered: false });
+    const rowsWithLocation = toCreate.map((row) => ({ ...row, location_id: importLocationId || null }));
+    const inserted = await Customer.insertMany(rowsWithLocation, { ordered: false });
     created = inserted.length;
   }
 
@@ -307,9 +387,11 @@ const importCustomers = async (req, res) => {
 
 // GET /api/customers/:id/requests
 const getCustomerRequests = async (req, res) => {
+  const scope = await singleCustomerScope(req);
   const customer = await Customer.findOne({
     _id: req.params.id,
     ...tenantFilter(req.user),
+    ...scope,
   }).select('_id');
   if (!customer) return res.status(404).json({ error: 'Customer not found.' });
   const requests = await ReviewRequest.find({ customer_id: req.params.id })
@@ -322,7 +404,16 @@ const getCustomerRequests = async (req, res) => {
 
 // GET /api/customers/export
 const exportCustomers = async (req, res) => {
-  const customers = await Customer.find(tenantFilter(req.user))
+  const filter = tenantFilter(req.user);
+  let locationFilter;
+  try {
+    locationFilter = await getLocationScopeFilter(req);
+  } catch (err) {
+    return res.status(err.statusCode || 400).json({ error: err.message });
+  }
+  Object.assign(filter, locationFilter);
+
+  const customers = await Customer.find(filter)
     .sort({ added_at: -1 })
     .lean();
   const header = ['Name', 'Phone', 'Email', 'Status', 'Added Date', 'Notes'];
@@ -355,9 +446,11 @@ const exportCustomers = async (req, res) => {
 };
 // GET /api/customers/:id/reviews
 const getCustomerReviews = async (req, res) => {
+  const scope = await singleCustomerScope(req);
   const customer = await Customer.findOne({
     _id: req.params.id,
     ...tenantFilter(req.user),
+    ...scope,
   }).select('_id');
   if (!customer) return res.status(404).json({ error: 'Customer not found.' });
   const reviews = await Review.find({ customer_id: customer._id })
@@ -373,6 +466,14 @@ const getCustomerReviews = async (req, res) => {
 const SYSTEM_TAGS = ['referral', 'qr_scan'];
 const getCustomerTags = async (req, res) => {
   const filter = tenantFilter(req.user);
+  let locationFilter;
+  try {
+    locationFilter = await getLocationScopeFilter(req);
+  } catch (err) {
+    return res.status(err.statusCode || 400).json({ error: err.message });
+  }
+  Object.assign(filter, locationFilter);
+
   const tags = await Customer.distinct('tags', filter);
   const custom = tags.filter((t) => t && SYSTEM_TAGS.indexOf(t) === -1).sort();
   res.json({ data: custom });

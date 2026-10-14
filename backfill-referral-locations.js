@@ -29,7 +29,12 @@ const Location         = require('./src/models/Location');
 const ReferralSignup   = require('./src/models/ReferralSignup');
 
 async function run() {
-  await mongoose.connect(process.env.MONGODB_URI);
+  const MONGO_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
+  if (!MONGO_URI) {
+    console.error('No MONGODB_URI / MONGO_URI found in environment (.env). Aborting -- nothing was touched.');
+    process.exit(1);
+  }
+  await mongoose.connect(MONGO_URI);
   console.log('Connected to MongoDB.');
 
   const businesses = await Business.find({}).select('_id name').lean();

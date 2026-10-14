@@ -15,6 +15,19 @@ const CustomerSchema = new Schema(
       ref: 'Business',
       required: [true, 'business_id is required'],
     },
+    // Owner Dashboard & Multi-Location spec: which branch this customer is
+    // tagged to -- set once, at creation (whichever location the staff
+    // member/owner adding them was acting from, or where their review
+    // request/referral redemption originated). Never reassigned on a later
+    // visit to a different branch -- this is one customer identity, not a
+    // per-branch duplicate, so repeat-customer recognition (dedup by phone)
+    // keeps working across the whole business. Nullable: legacy customers
+    // and single-location businesses with no real branch distinction yet.
+    location_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'Location',
+      default: null,
+    },
     name: {
       type: String,
       required: [true, 'Customer name is required'],
@@ -81,5 +94,8 @@ CustomerSchema.index({ business_id: 1, tags: 1 });
 
 // Soft opt-out filter used in every send operation
 CustomerSchema.index({ business_id: 1, opted_out: 1 });
+
+// Branch-scoped customer list (Owner Dashboard)
+CustomerSchema.index({ business_id: 1, location_id: 1 });
 
 module.exports = mongoose.model('Customer', CustomerSchema);
