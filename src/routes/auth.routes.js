@@ -1,15 +1,27 @@
-﻿'use strict';
+'use strict';
 
 /**
  * Auth routes
- *  -- 
- * POST /api/auth/signup          ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â public self-registration
- * POST /api/auth/register        ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â super_admin creates Business + User
- * POST /api/auth/login           ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â validates credentials, issues tokens
- * POST /api/auth/refresh         ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â rotates refresh token, new access token
- * POST /api/auth/logout          ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â clears refresh cookie
- * POST /api/auth/change-password ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â forced on first login
- *  -- 
+ * --
+ * POST /api/auth/signup          — public self-registration
+ * POST /api/auth/register        — super_admin creates Business + User
+ * POST /api/auth/login           — validates credentials, issues tokens
+ * POST /api/auth/refresh         — rotates refresh token, new access token
+ * POST /api/auth/logout          — clears refresh cookie
+ * POST /api/auth/change-password — forced on first login
+ * --
+ *
+ * Phase 2 (Owner Dashboard & Multi-Location spec) changes in this file:
+ *   - /register and /signup now ALSO create a default Location for the new
+ *     Business, reusing its qr_token. Without this, a business signing up
+ *     after Phase 1 shipped would have NO Location document at all, and
+ *     public.controller.js's getQrReview() (which resolves scans against
+ *     Location.qr_token, not Business.qr_token) would 404 every single
+ *     scan of their QR code from day one. This mirrors exactly what
+ *     migrate-to-locations.js did for pre-existing businesses.
+ *   - /login and /refresh now include location_ids / active_location_id
+ *     on the returned user object, so the frontend's AuthContext actually
+ *     has what the owner shell needs (eligibility, branch selector, etc).
  */
 
 const express        = require('express');
@@ -22,6 +34,7 @@ const rateLimit      = require('express-rate-limit');
 
 const User     = require('../models/User');
 const Business = require('../models/Business');
+const Location = require('../models/Location');
 const BusinessReferral = require('../models/BusinessReferral');
 const BusinessReferralSignup = require('../models/BusinessReferralSignup');
 const PlatformBillingSettings = require('../models/PlatformBillingSettings');
@@ -32,9 +45,9 @@ const { sendPasswordResetEmail, sendNewSignupNotification } = require('../utils/
 
 const router = express.Router();
 
-//  -- 
+// --
 // Constants
-//  -- 
+// --
 
 const BCRYPT_ROUNDS        = 12;
 const ACCESS_TOKEN_TTL     = process.env.JWT_EXPIRES_IN || '15m';
@@ -42,9 +55,9 @@ const REFRESH_COOKIE_NAME  = 'refresh_token';
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const REFRESH_TOKEN_TTL_S  = 30 * 24 * 60 * 60;
 
-//  -- 
+// --
 // Helpers
-//  -- 
+// --
 
 const sha256 = (value) =>
   nodeCrypto.createHash('sha256').update(value).digest('hex');
@@ -84,10 +97,26 @@ const clearRefreshCookie = (res) => {
   });
 };
 
-//  -- 
-// Rate limiter ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â 5 login attempts per 15 minutes per IP+email
+// Phase 2: creates the one default Location every new Business needs so
+// its QR code has something to resolve against. Reuses the business's own
+// qr_token (already set by the Business schema's default) so the very
+// first scan -- before the owner has done anything else -- already works.
+const createDefaultLocation = async (business) => {
+  return Location.create({
+    business_id: business._id,
+    name:        business.name || 'Main Location',
+    status:      'active',
+    is_default:  true,
+    qr_token:    business.qr_token || undefined,
+    google_review_url: business.google_review_url || null,
+    brand_logo_url:    null,
+  });
+};
+
+// --
+// Rate limiter — 5 login attempts per 15 minutes per IP+email
 // Applied only to POST /auth/login
-//  -- 
+// --
 
 const loginLimiter = rateLimit({
   windowMs:               15 * 60 * 1000,
@@ -104,10 +133,10 @@ const loginLimiter = rateLimit({
   },
 });
 
-//  -- 
-// Rate limiter ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â 5 signup attempts per hour per IP
+// --
+// Rate limiter — 5 signup attempts per hour per IP
 // Applied only to POST /auth/signup
-//  -- 
+// --
 
 const signupLimiter = rateLimit({
   windowMs:        60 * 60 * 1000,
@@ -119,9 +148,9 @@ const signupLimiter = rateLimit({
   },
 });
 
-//  -- 
+// --
 // Joi validation schemas
-//  -- 
+// --
 
 const loginSchema = Joi.object({
   email:    Joi.string().email().required(),
@@ -140,7 +169,7 @@ const registerSchema = Joi.object({
   owner_name:        Joi.string().min(2).max(100).required(),
   owner_email:       Joi.string().email().required(),
   owner_password:    Joi.string().min(8).required(),
-  role:              Joi.string().valid('owner', 'staff').default('owner'),
+  role:              Joi.string().valid('owner', 'branch_manager').default('owner'),
 });
 
 const changePasswordSchema = Joi.object({
@@ -165,12 +194,12 @@ const signupSchema = Joi.object({
   ref:                Joi.string().trim().max(20).optional().allow('', null),
 });
 
-//  -- 
+// --
 // POST /auth/register
-//  -- 
+// --
 /**
  * Super-admin only. Creates a new Business + owner User in one operation.
- * google_review_url is required here ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â admin always sets it at registration.
+ * google_review_url is required here — admin always sets it at registration.
  */
 router.post(
   '/register',
@@ -208,6 +237,8 @@ router.post(
       source:            'admin_created',
     });
 
+    const defaultLocation = await createDefaultLocation(business);
+
     const user = await User.create({
       business_id:          business._id,
       name:                 owner_name,
@@ -215,6 +246,8 @@ router.post(
       password_hash,
       role,
       must_change_password: true,
+      location_ids:         [defaultLocation._id],
+      active_location_id:   defaultLocation._id,
     });
 
     return res.status(201).json({
@@ -226,19 +259,21 @@ router.post(
         email:                user.email,
         role:                 user.role,
         must_change_password: user.must_change_password,
+        location_ids:         user.location_ids,
+        active_location_id:   user.active_location_id,
       },
     });
   })
 );
 
-//  -- 
+// --
 // POST /auth/signup
-//  -- 
+// --
 /**
  * Public self-registration. Creates Business + owner User.
  * Rate-limited to 5 signups per hour per IP.
- * Sets must_change_password: false -- user chose their own password.
- * google_review_url is optional -- can be added later in Settings.
+ * Sets must_change_password: false — user chose their own password.
+ * google_review_url is optional — can be added later in Settings.
  */
 router.post(
   '/signup',
@@ -259,7 +294,7 @@ router.post(
 
     const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    // Engine B ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â resolve an incoming ?ref= code (if any) to the referring
+    // Engine B — resolve an incoming ?ref= code (if any) to the referring
     // business before creating this one, so it can be tagged at creation.
     let referringBusinessReferral = null;
     if (ref && ref.trim()) {
@@ -286,9 +321,10 @@ router.post(
         referral_id:           referringBusinessReferral._id,
         referrer_business_id:  referringBusinessReferral.business_id,
         new_business_id:       business._id,
-      }).catch(() => { /* duplicate-key race on the unique new_business_id ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â safe to ignore */ });
+      }).catch(() => { /* duplicate-key race on the unique new_business_id — safe to ignore */ });
     }
 
+    const defaultLocation = await createDefaultLocation(business);
 
     const user = await User.create({
       business_id:          business._id,
@@ -297,9 +333,11 @@ router.post(
       password_hash,
       role:                 'owner',
       must_change_password: false,
+      location_ids:         [defaultLocation._id],
+      active_location_id:   defaultLocation._id,
     });
 
-    sendNewSignupNotification(owner_name, business.name, business.type, email).catch(function() { /* non-critical -- never block signup on this */ });
+    sendNewSignupNotification(owner_name, business.name, business.type, email).catch(function() { /* non-critical — never block signup on this */ });
 
     const accessToken     = signAccessToken(user);
     const rawRefreshToken = generateRefreshToken();
@@ -319,14 +357,16 @@ router.post(
         business_id: user.business_id,
         must_change_password: false,
         onboarding_completed: false,
+        location_ids:         user.location_ids,
+        active_location_id:   user.active_location_id,
       },
     });
   })
 );
 
-//  -- 
+// --
 // POST /auth/login
-//  -- 
+// --
 
 router.post(
   '/login',
@@ -380,14 +420,16 @@ router.post(
         role:        user.role,
         business_id: user.business_id,
         onboarding_completed: onboardingCompleted,
+        location_ids:         user.location_ids,
+        active_location_id:   user.active_location_id,
       },
     });
   })
 );
 
-//  -- 
+// --
 // POST /auth/refresh
-//  -- 
+// --
 
 router.post(
   '/refresh',
@@ -434,14 +476,16 @@ router.post(
         business_id:          user.business_id,
         must_change_password: user.must_change_password,
         onboarding_completed: onboardingCompleted,
+        location_ids:         user.location_ids,
+        active_location_id:   user.active_location_id,
       },
     });
   })
 );
 
-//  -- 
+// --
 // POST /auth/logout
-//  -- 
+// --
 
 router.post(
   '/logout',
@@ -456,9 +500,9 @@ router.post(
   })
 );
 
-//  -- 
+// --
 // POST /auth/change-password
-//  -- 
+// --
 
 router.post(
   '/change-password',
@@ -506,9 +550,9 @@ router.post(
   })
 );
 
-//  -- 
+// --
 // POST /auth/forgot-password
-//  -- 
+// --
 
 router.post(
   '/forgot-password',
@@ -553,9 +597,9 @@ router.post(
   })
 );
 
-//  -- 
+// --
 // POST /auth/reset-password
-//  -- 
+// --
 
 router.post(
   '/reset-password',

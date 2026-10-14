@@ -1,10 +1,21 @@
-﻿'use strict';
+'use strict';
 /**
  * public.controller.js
  * NO authentication -- hit by customers clicking review links.
+ *
+ * Phase 1 (Owner Dashboard & Multi-Location spec): getQrReview now resolves
+ * the scanned QR token against Location.qr_token instead of
+ * Business.qr_token. The Phase 1 migration (migrate-to-locations.js) copies
+ * every existing business's qr_token onto its new default Location before
+ * this code is live, so any QR code or sticker already printed keeps
+ * resolving to the exact same business, with zero interruption --
+ * Business.qr_token itself is left untouched in the schema (still read by
+ * the owner's "my QR" display in business.controller.js) but is no longer
+ * used for public scan resolution.
  */
 const nodeCrypto    = require('crypto');
 const Business      = require('../models/Business');
+const Location      = require('../models/Location');
 const Customer      = require('../models/Customer');
 const ReviewRequest = require('../models/ReviewRequest');
 const Review        = require('../models/Review');
@@ -20,7 +31,8 @@ const { generateTags } = require('../utils/feedbackTagger');
 const validateToken = async (req, res) => {
   const request = await ReviewRequest.findOne({ unique_token: req.params.token })
     .populate('business_id', 'name google_review_url brand_logo_url type')
-    .populate('customer_id', 'name');
+    .populate('customer_id', 'name')
+    .populate('location_id', 'name google_review_url brand_logo_url status');
 
   if (!request) {
     return res.status(404).json({ error: 'This review link is invalid.' });
@@ -39,12 +51,21 @@ const validateToken = async (req, res) => {
     );
   }
 
+  // Branch-level override wins when this request has a location and that
+  // location has its own value set; otherwise fall back to the
+  // organization-wide default on Business -- settings precedence rule,
+  // spec section 12.
+  const loc = request.location_id || null;
+  const google_review_url = (loc && loc.google_review_url) || request.business_id.google_review_url;
+  const logo_url           = (loc && loc.brand_logo_url)   || request.business_id.brand_logo_url || null;
+
   res.json({
     data: {
       business_name:     request.business_id.name,
       business_type:     request.business_id.type || null,
-      google_review_url: request.business_id.google_review_url,
-      logo_url:          request.business_id.brand_logo_url || null,
+      google_review_url: google_review_url,
+      logo_url:          logo_url,
+      location_name:     loc ? loc.name : null,
       customer_name:     request.customer_id ? request.customer_id.name : null,
       request_id:        request._id,
     },
@@ -94,6 +115,7 @@ const submitReview = async (req, res) => {
 
   const review = await Review.create({
     business_id:   request.business_id,
+    location_id:   request.location_id || null,
     customer_id:   request.customer_id,
     request_id:    request._id,
     rating,
@@ -190,8 +212,8 @@ const submitReview = async (req, res) => {
 const QR_TEMPLATE_KEYS = ['table_tent', 'poster', 'sticker', 'counter_card'];
 
 const getQrReview = async (req, res) => {
-  const business = await Business.findOne({ qr_token: req.params.qr_token });
-  if (!business) {
+  const location = await Location.findOne({ qr_token: req.params.qr_token, status: 'active' });
+  if (!location) {
     return res.status(404).json({ error: 'Invalid QR code.' });
   }
   const unique_token = nodeCrypto.randomBytes(20).toString('hex');
@@ -199,18 +221,19 @@ const getQrReview = async (req, res) => {
   const rawTemplate  = typeof req.query.template === 'string' ? req.query.template.toLowerCase().trim() : null;
   const qr_template  = QR_TEMPLATE_KEYS.includes(rawTemplate) ? rawTemplate : null;
 
-  // Staff-specific QR â€” each staff-directory member can have their own
+  // Staff-specific QR -- each staff-directory member can have their own
   // sticker/QR (?staff=<id>) that auto-attributes the resulting review
   // request to them, with zero selection needed from anyone.
   let served_by = null;
   const rawStaffId = typeof req.query.staff === 'string' ? req.query.staff.trim() : null;
   if (rawStaffId) {
-    const staffMember = await StaffMember.findOne({ _id: rawStaffId, business_id: business._id }).select('name').lean().catch(() => null);
+    const staffMember = await StaffMember.findOne({ _id: rawStaffId, business_id: location.business_id }).select('name').lean().catch(() => null);
     if (staffMember) served_by = staffMember.name;
   }
 
   await ReviewRequest.create({
-    business_id: business._id,
+    business_id: location.business_id,
+    location_id: location._id,
     customer_id: null,
     unique_token,
     channel:     'qr',
@@ -223,8 +246,8 @@ const getQrReview = async (req, res) => {
   res.json({ data: { token: unique_token } });
 };
 
-// POST /api/r/:token/identify â€” optional name/phone capture for anonymous
-// (mainly QR) requests. Skippable â€” the frontend simply won't call this if
+// POST /api/r/:token/identify -- optional name/phone capture for anonymous
+// (mainly QR) requests. Skippable -- the frontend simply won't call this if
 // the customer chooses Skip.
 const identifyCustomer = async (req, res) => {
   const { name, phone } = req.body;
@@ -237,7 +260,7 @@ const identifyCustomer = async (req, res) => {
     return res.status(410).json({ error: 'This review has already been submitted.' });
   }
   if (request.customer_id) {
-    // Already tied to a known customer (WhatsApp/SMS/Email requests) â€” nothing to do.
+    // Already tied to a known customer (WhatsApp/SMS/Email requests) -- nothing to do.
     return res.json({ data: { ok: true } });
   }
   if (!name || !name.trim()) {

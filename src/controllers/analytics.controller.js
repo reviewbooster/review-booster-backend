@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 /**
  * analytics.controller.js
  * Aggregated stats for the dashboard overview page.
@@ -6,28 +6,42 @@
  * Session 18 fix -- ?days param for rolling period on summary + chart.
  * Later fix -- headline stats period-bounded, custom date ranges, and optional
  * ?channel / ?rating filters for pages (like Reviews) that need filter-aware stats.
+ *
+ * Phase 4 (Owner Dashboard spec, "Overview and filters", section 4/13):
+ *  - Every endpoint below now accepts an optional ?location_id= filter, on
+ *    top of the existing tenant (business_id) scoping.
+ *  - New getByLocation -- the per-branch comparison table for the Owner
+ *    Overview page. Owner/super_admin only.
+ *
+ * Phase 5 fix: location scoping now goes through the shared
+ * utils/locationScope.js helper instead of a local one-off. That fixed a
+ * real gap -- previously, a branch_manager calling any of these endpoints
+ * with NO ?location_id= (which is exactly what the branch dashboard's own
+ * pages do; they never send that param) got whole-BUSINESS numbers, not
+ * just their own assigned branch's. The shared helper always scopes a
+ * branch_manager to their own location_ids by default, same as the fix
+ * applied to review.controller.js. Owner/super_admin behavior (optional
+ * filter, defaults to everything) is unchanged.
  */
 const Review        = require('../models/Review');
 const ReviewRequest = require('../models/ReviewRequest');
 const Business      = require('../models/Business');
-const mongoose      = require('mongoose');
+const mongoose       = require('mongoose');
 const { canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 const { lockedResponse } = require('../utils/planGate');
 const { fetchImageBuffer, sendAnalyticsReportPdf } = require('../utils/exportBranding');
+const { getLocationScopeFilter } = require('../utils/locationScope');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
   return { business_id: new mongoose.Types.ObjectId(user.business_id) };
 };
 
-// Shared by getSummary (JSON) and exportAnalyticsReport (PDF) -- one source
-// of truth for the numbers, so the exported report can never drift from
-// what the Analytics page itself shows. Throws { statusCode, message } for
-// the one validation case (bad date range); callers translate that to a
-// 400 response themselves since this function doesn't have access to `res`.
-const computeSummaryData = async (req) => {
-  const filter = tenantFilter(req.user);
-
+// Shared period-range resolution -- ?days=N or ?start_date&end_date, plus
+// the matching previous period for trend comparisons. Extracted so
+// getByLocation can use the exact same window as computeSummaryData
+// without duplicating the parsing logic.
+const resolvePeriodRange = (req) => {
   let periodStart, periodEnd, days;
   if (req.query.start_date && req.query.end_date) {
     periodStart = new Date(req.query.start_date);
@@ -52,6 +66,20 @@ const computeSummaryData = async (req) => {
   const prevEnd = new Date(periodStart.getTime() - 1);
   const prevStart = new Date(periodStart);
   prevStart.setDate(prevStart.getDate() - days);
+
+  return { periodStart, periodEnd, days, prevStart, prevEnd };
+};
+
+// Shared by getSummary (JSON) and exportAnalyticsReport (PDF) -- one source
+// of truth for the numbers, so the exported report can never drift from
+// what the Analytics page itself shows. Throws { statusCode, message } for
+// validation cases (bad date range, bad/unauthorized location_id); callers
+// translate that to a response themselves since this function doesn't have
+// access to `res`.
+const computeSummaryData = async (req) => {
+  const filter = { ...tenantFilter(req.user), ...(await getLocationScopeFilter(req)) };
+
+  const { periodStart, periodEnd, days, prevStart, prevEnd } = resolvePeriodRange(req);
 
   const periodFilter = { ...filter, created_at: { $gte: periodStart, $lte: periodEnd } };
 
@@ -224,6 +252,7 @@ const computeSummaryData = async (req) => {
 };
 
 // GET /api/analytics/summary?days=N  OR  ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+// Phase 4: plus optional &location_id= to scope to one branch.
 const getSummary = async (req, res) => {
   try {
     const data = await computeSummaryData(req);
@@ -235,8 +264,15 @@ const getSummary = async (req, res) => {
 };
 
 // GET /api/analytics/reviews-over-time?days=N  OR  ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+// Phase 4: plus optional &location_id=.
 const getReviewsOverTime = async (req, res) => {
-  const filter = tenantFilter(req.user);
+  let filter;
+  try {
+    filter = { ...tenantFilter(req.user), ...(await getLocationScopeFilter(req)) };
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
 
   // The deeper trend chart is the "Analytics" paid feature -- the basic
   // summary stats above (shared with the Dashboard) stay free regardless.
@@ -300,6 +336,7 @@ const getReviewsOverTime = async (req, res) => {
 };
 
 // GET /api/analytics/qr-stats?days=N
+// Phase 4: plus optional &location_id=.
 const QR_TEMPLATE_LABELS = {
   table_tent:   'Table Tent',
   poster:       'Poster',
@@ -313,7 +350,13 @@ const pctChange = (current, prev) => {
 };
 
 const getQrStats = async (req, res) => {
-  const filter = tenantFilter(req.user);
+  let filter;
+  try {
+    filter = { ...tenantFilter(req.user), ...(await getLocationScopeFilter(req)) };
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
 
   const days = Math.max(1, Math.min(parseInt(req.query.days, 10) || 30, 365));
   const periodEnd = new Date();
@@ -419,12 +462,103 @@ const getQrStats = async (req, res) => {
   });
 };
 
+// GET /api/analytics/by-location?days=N  OR  ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+// Phase 4 (spec section 4): per-branch comparison rollup for the Owner
+// Overview page -- owner/super_admin only. A branch_manager only ever
+// works inside their own assigned location(s), so comparing branches
+// against each other isn't something they need or should see.
+const getByLocation = async (req, res) => {
+  if (req.user.role !== 'owner' && req.user.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Not authorized.' });
+  }
+
+  const Location = require('../models/Location');
+  const filter = tenantFilter(req.user);
+
+  let periodStart, periodEnd;
+  try {
+    ({ periodStart, periodEnd } = resolvePeriodRange(req));
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
+
+  const periodFilter = { ...filter, created_at: { $gte: periodStart, $lte: periodEnd } };
+
+  const [locations, reviewAgg, requestAgg] = await Promise.all([
+    Location.find(filter).select('name status is_default').sort({ is_default: -1, name: 1 }).lean(),
+    Review.aggregate([
+      { $match: periodFilter },
+      {
+        $group: {
+          _id:           '$location_id',
+          total:         { $sum: 1 },
+          total_public:  { $sum: { $cond: [{ $eq: ['$is_public', true]  }, 1, 0] } },
+          total_private: { $sum: { $cond: [{ $eq: ['$is_public', false] }, 1, 0] } },
+          avg_rating:    { $avg: '$rating' },
+        },
+      },
+    ]),
+    ReviewRequest.aggregate([
+      { $match: periodFilter },
+      { $group: { _id: '$location_id', sent: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const reviewByLoc = {};
+  reviewAgg.forEach((r) => { reviewByLoc[String(r._id)] = r; });
+  const sentByLoc = {};
+  requestAgg.forEach((r) => { sentByLoc[String(r._id)] = r.sent; });
+
+  const rows = locations.map((loc) => {
+    const r = reviewByLoc[String(loc._id)] || { total: 0, total_public: 0, total_private: 0, avg_rating: 0 };
+    const sent = sentByLoc[String(loc._id)] || 0;
+    return {
+      location_id:         loc._id,
+      name:                loc.name,
+      status:              loc.status,
+      is_default:          loc.is_default,
+      total_reviews:       r.total,
+      total_public:        r.total_public,
+      total_private:       r.total_private,
+      avg_rating:          r.avg_rating ? parseFloat(r.avg_rating.toFixed(1)) : 0,
+      total_requests_sent: sent,
+      conversion_rate:     sent > 0 ? parseFloat((r.total / sent).toFixed(2)) : 0,
+    };
+  });
+
+  // Reviews/requests with no location_id (legacy data predating this
+  // field, or a channel that wasn't location-aware yet) get their own row
+  // rather than being silently dropped from the comparison -- the owner
+  // should be able to see that gap, not have it hidden.
+  const unassignedReview = reviewByLoc['null'] || { total: 0, total_public: 0, total_private: 0, avg_rating: 0 };
+  const unassignedSent   = sentByLoc['null'] || 0;
+  if (unassignedReview.total > 0 || unassignedSent > 0) {
+    rows.push({
+      location_id:         null,
+      name:                'Unassigned',
+      status:              null,
+      is_default:          false,
+      total_reviews:       unassignedReview.total,
+      total_public:        unassignedReview.total_public,
+      total_private:       unassignedReview.total_private,
+      avg_rating:          unassignedReview.avg_rating ? parseFloat(unassignedReview.avg_rating.toFixed(1)) : 0,
+      total_requests_sent: unassignedSent,
+      conversion_rate:     unassignedSent > 0 ? parseFloat((unassignedReview.total / unassignedSent).toFixed(2)) : 0,
+    });
+  }
+
+  res.json({ data: rows });
+};
+
 // GET /api/analytics/export?days=N  OR  ?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
 // A real multi-section PDF report (Executive Overview, Review Funnel,
 // Rating Breakdown, Channel Performance, Top Feedback Topics), branded with
 // both ReviewBooster's own logo and the business's own name/logo/color.
 // Gated like the trend chart above -- same "Analytics" paid feature, same
 // reasoning: this is the deeper numbers, not the free headline stats.
+// Phase 4: plus optional &location_id=, same as getSummary (computeSummaryData
+// handles it).
 const exportAnalyticsReport = async (req, res) => {
   let myBusiness = null;
   if (req.user.role !== 'super_admin') {
@@ -446,7 +580,13 @@ const exportAnalyticsReport = async (req, res) => {
   // Top Feedback Topics -- same real tag-count query as
   // GET /api/reviews/theme-summary, duplicated locally (a few lines) rather
   // than importing another controller's internal logic across files.
-  const filter = tenantFilter(req.user);
+  let filter;
+  try {
+    filter = { ...tenantFilter(req.user), ...(await getLocationScopeFilter(req)) };
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
   const days = (req.query.start_date && req.query.end_date)
     ? Math.max(1, Math.round((new Date(req.query.end_date) - new Date(req.query.start_date)) / (1000 * 60 * 60 * 24)) + 1)
     : Math.max(1, Math.min(parseInt(req.query.days, 10) || 30, 365));
@@ -503,8 +643,8 @@ const exportAnalyticsReport = async (req, res) => {
   const volTrend = (summary.this_month?.total_reviews ?? 0) - (summary.last_month?.total_reviews ?? 0);
   if (volTrend !== 0) {
     summaryText += volTrend > 0
-      ? (' That\u2019s ' + volTrend + ' more than the previous period.')
-      : (' That\u2019s ' + Math.abs(volTrend) + ' fewer than the previous period.');
+      ? (' That’s ' + volTrend + ' more than the previous period.')
+      : (' That’s ' + Math.abs(volTrend) + ' fewer than the previous period.');
   }
 
   const opportunities = [];
@@ -543,7 +683,7 @@ const exportAnalyticsReport = async (req, res) => {
   }
   if (biggestDrop && biggestDrop.lost >= 3) {
     opportunities.push(
-      'Your biggest drop-off is between ' + biggestDrop.from + ' and ' + biggestDrop.to + ' \u2014 ' +
+      'Your biggest drop-off is between ' + biggestDrop.from + ' and ' + biggestDrop.to + ' — ' +
       biggestDrop.lost + ' request' + (biggestDrop.lost === 1 ? '' : 's') + " didn't continue past that step."
     );
   }
@@ -559,7 +699,7 @@ const exportAnalyticsReport = async (req, res) => {
   // 4. Slow time-to-review.
   if (summary.avg_days_to_review != null && summary.avg_days_to_review >= 2) {
     opportunities.push(
-      'Customers take an average of ' + summary.avg_days_to_review + ' days to leave a review after being asked \u2014 a faster follow-up window might help.'
+      'Customers take an average of ' + summary.avg_days_to_review + ' days to leave a review after being asked — a faster follow-up window might help.'
     );
   }
 
@@ -577,4 +717,4 @@ const exportAnalyticsReport = async (req, res) => {
   });
 };
 
-module.exports = { getSummary, getReviewsOverTime, getQrStats, exportAnalyticsReport };
+module.exports = { getSummary, getReviewsOverTime, getQrStats, getByLocation, exportAnalyticsReport };

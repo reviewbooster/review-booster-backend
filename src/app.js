@@ -1,10 +1,10 @@
 'use strict';
 
 /**
- * app.js ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Express application setup
+ * app.js — Express application setup
  *
  * Responsibility: configure middleware, mount routes.
- * Does NOT call listen() ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â that lives in server.js so tests can import
+ * Does NOT call listen() — that lives in server.js so tests can import
  * this file without binding a port.
  */
 
@@ -31,19 +31,19 @@ const reviewRoutes    = require('./routes/review.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const { globalErrorHandler } = require('./middleware/errorHandler');
 
-//  -- 
+// --
 // Boot database connection
-//  -- 
+// --
 connectDB();
 
-//  -- 
+// --
 // App
-//  -- 
+// --
 const app = express();
 
 app.use(helmet());
 
-//  --  CORS  -- 
+// -- CORS --
 const allowedOrigins = [
   process.env.FRONTEND_URL || 'http://localhost:3000',
 ];
@@ -63,32 +63,32 @@ app.use(
   })
 );
 
-//  --  Body parsers  -- 
+// -- Body parsers --
 app.use(express.json({ limit: '10kb' }));       // Guard against large payloads
 app.use(express.urlencoded({ extended: false }));
 
-//  --  Cookie parser (needed for httpOnly refresh token)  -- 
+// -- Cookie parser (needed for httpOnly refresh token) --
 app.use(cookieParser());
 
-//  --  HTTP request logging  -- 
+// -- HTTP request logging --
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('dev'));
 }
 
-//  -- 
+// --
 // Health check (UptimeRobot pings this every 5 minutes)
-//  -- 
+// --
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 
-//  -- 
+// --
 // Routes
-//  -- 
+// --
 app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 
 app.use('/api/auth', authRoutes);
 
 // Week 2 routes
-// Public review route gets its own tighter rate limiter ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â customers tapping links
+// Public review route gets its own tighter rate limiter -- customers tapping links
 const rateLimit    = require('express-rate-limit');
 const publicLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
@@ -112,17 +112,20 @@ app.use('/api/billing', require('./routes/billing.routes'));
 app.use('/api/win-back', require('./routes/winback.routes'));
 app.use('/api/follow-ups', require('./routes/followup.routes'));
 app.use('/api/support-chat', publicLimiter, require('./routes/supportChat.routes'));
+// Phase 2 (Owner Dashboard & Multi-Location spec): read-only location list
+// + "set active location" -- backs the owner shell's branch selector.
+app.use('/api/locations', require('./routes/location.routes'));
 
-//  -- 
-// 404 handler ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â must come BEFORE the global error handler
-//  -- 
+// --
+// 404 handler -- must come BEFORE the global error handler
+// --
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found.' });
 });
 
-//  -- 
-// Global error handler ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â must be LAST (4-argument signature required)
-//  -- 
+// --
+// Global error handler -- must be LAST (4-argument signature required)
+// --
 app.use(globalErrorHandler);
 
 module.exports = app;

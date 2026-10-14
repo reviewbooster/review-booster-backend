@@ -8,7 +8,7 @@ const asyncWrap = require('../utils/asyncWrap');
 const {
   listBusinesses, deleteBusiness, resetBusinessPassword,
   getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, getMyResults, setGoogleNumbers, uploadMyLogo, deleteMyLogo,
-  updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff,
+  updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff, patchStaffLocations,
 } = require('../controllers/business.controller');
 const { getMyStory, saveMyStory, withdrawMyStory } = require('../controllers/successStory.controller');
 const upload = multer({
@@ -38,6 +38,10 @@ router.delete('/my-logo',     auth, roleGuard('owner'), asyncWrap(deleteMyLogo))
 router.get('/staff',          auth, roleGuard('owner'), asyncWrap(listStaff));
 router.post('/staff',         auth, roleGuard('owner'), asyncWrap(createStaff));
 router.delete('/staff/:id',   auth, roleGuard('owner'), asyncWrap(deleteStaff));
+// Phase 3 (Locations and Team, spec section 8): assign a branch manager to
+// one or more locations -- owner only. Full-replace semantics; see
+// business.controller.js's patchStaffLocations for details.
+router.patch('/staff/:id/locations', auth, roleGuard('owner'), asyncWrap(patchStaffLocations));
 
 // Super-admin routes
 router.get('/',                auth, requireSuperAdmin, asyncWrap(listBusinesses));

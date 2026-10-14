@@ -17,6 +17,21 @@ const ReviewRequestSchema = new Schema(
       required: [true, 'business_id is required'],
     },
     /**
+     * Phase 1 (Owner Dashboard & Multi-Location spec): which branch this
+     * request belongs to. Stamped automatically for QR-sourced requests
+     * (from the Location whose qr_token was scanned -- see
+     * public.controller.js getQrReview). Null for requests sent before
+     * this field existed, and for other channels until the owner's
+     * send-flow becomes location-aware in a later phase. Never used to
+     * leak data across branches -- always paired with business_id in
+     * every tenant-scoped query.
+     */
+    location_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'Location',
+      default: null,
+    },
+    /**
      * Null only for QR-code-sourced requests where the customer is anonymous
      * (Phase 3).  For all other channels, required.
      */
@@ -104,5 +119,8 @@ ReviewRequestSchema.index({ status: 1, reminder_sent: 1, sent_at: 1, expires_at:
 
 // Per-customer "sent in last 30 days" duplicate-send check
 ReviewRequestSchema.index({ business_id: 1, customer_id: 1, sent_at: -1 });
+
+// Branch-level filtering (Phase 4/5: Overview, Analytics, Reviews per branch)
+ReviewRequestSchema.index({ business_id: 1, location_id: 1, sent_at: -1 });
 
 module.exports = mongoose.model('ReviewRequest', ReviewRequestSchema);

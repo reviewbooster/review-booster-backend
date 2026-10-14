@@ -4,11 +4,31 @@
  * Super-admin: list, delete businesses, reset passwords.
  * getMyQrToken: authenticated owner endpoint, no super_admin check.
  * getBusinessQr: super_admin can fetch/generate any business QR token.
+ *
+ * Phase 1 (Owner Dashboard & Multi-Location spec): listStaff/createStaff/
+ * deleteStaff now read and write role: 'branch_manager' instead of the old
+ * 'staff' value (User.role enum was renamed -- see models/User.js and
+ * migrate-to-locations.js, which relabels every existing account). The
+ * route paths (/api/business/staff...) and the plan-limit key 'staff' used
+ * for seat-count gating below are deliberately left unchanged -- that key
+ * names a billing concept (how many team-member seats a plan allows), not
+ * a role, and renaming it would be a separate, unrelated change.
+ *
+ * Phase 3 (Locations and Team, spec section 8): createStaff now accepts
+ * an optional location_ids array so a new branch manager can be scoped to
+ * one or more locations at creation time, listStaff returns location_ids/
+ * active_location_id so the owner's Team page can show current
+ * assignments, and a new patchStaffLocations lets the owner change those
+ * assignments later. All three are still scoped to req.user.business_id
+ * and verify every location_id actually belongs to that business, so an
+ * owner can never assign (or accidentally reveal) another business's
+ * locations.
  */
 const nodeCrypto    = require('crypto');
 const mongoose      = require('mongoose');
 const Business      = require('../models/Business');
 const User          = require('../models/User');
+const Location      = require('../models/Location');
 const Customer      = require('../models/Customer');
 const ReviewRequest = require('../models/ReviewRequest');
 const Review        = require('../models/Review');
@@ -94,7 +114,7 @@ const getResetRequests = async (req, res) => {
   res.json({ data: users });
 };
 
-// GET /api/business/my-qr ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â any authenticated user with a business_id
+// GET /api/business/my-qr — any authenticated user with a business_id
 const getMyQrToken = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
@@ -114,7 +134,7 @@ const getMyQrToken = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name, business_type: business.type || null } });
 };
 
-// GET /api/business/:id/qr ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â super_admin fetches any business QR token (auto-creates if missing)
+// GET /api/business/:id/qr — super_admin fetches any business QR token (auto-creates if missing)
 const getBusinessQr = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -131,7 +151,7 @@ const getBusinessQr = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name } });
 };
 
-// PATCH /api/business/:id/google-url ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â super_admin only
+// PATCH /api/business/:id/google-url — super_admin only
 const updateGoogleUrl = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -303,8 +323,8 @@ const updateMySettings = async (req, res) => {
 // marks one product-feature key (e.g. 'dive_qr', 'info_growth') as seen for
 // this business, idempotently. Deliberately its own endpoint rather than
 // folded into updateMySettings above, since that one is owner-only and this
-// needs to work for staff logins too -- it is product-adoption tracking,
-// not a business setting.
+// needs to work for branch_manager logins too -- it is product-adoption
+// tracking, not a business setting.
 const markFeatureSeen = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
@@ -370,23 +390,24 @@ const deleteMyLogo = async (req, res) => {
   ).select('brand_logo_url');
   res.json({ data: { brand_logo_url: business.brand_logo_url } });
 };
-// GET /api/business/staff - owner only, lists staff accounts for their own business
+
+// GET /api/business/staff - owner only, lists branch_manager accounts for their own business
 const listStaff = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
-  const staff = await User.find({ business_id: req.user.business_id, role: 'staff' })
-    .select('name email created_at')
+  const staff = await User.find({ business_id: req.user.business_id, role: 'branch_manager' })
+    .select('name email created_at location_ids active_location_id')
     .sort({ created_at: -1 });
   res.json({ data: staff });
 };
 
-// POST /api/business/staff - owner only, creates a staff account for their own business
+// POST /api/business/staff - owner only, creates a branch_manager account for their own business
 const createStaff = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
-  const { name, email, password } = req.body;
+  const { name, email, password, location_ids } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Name is required.' });
   }
@@ -399,7 +420,7 @@ const createStaff = async (req, res) => {
 
   const myBusiness = await Business.findById(req.user.business_id).select('plan trial_ends_at plan_expires_at').lean();
   const limits = await getPlanLimits(getEffectivePlanSlug(myBusiness));
-  const currentStaffCount = await User.countDocuments({ business_id: req.user.business_id, role: 'staff' });
+  const currentStaffCount = await User.countDocuments({ business_id: req.user.business_id, role: 'branch_manager' });
   if (currentStaffCount >= limits.staff) {
     return lockedResponse(res, myBusiness, { kind: 'cap', feature: 'staff', limit: limits.staff });
   }
@@ -407,6 +428,19 @@ const createStaff = async (req, res) => {
   const existing = await User.findOne({ email: email.toLowerCase().trim() });
   if (existing) {
     return res.status(409).json({ error: 'A user with that email already exists.' });
+  }
+
+  // Phase 3: optional location assignment at creation time. Every id must
+  // actually belong to this business -- silently drops anything that
+  // doesn't (rather than erroring), since a stray/foreign id here is
+  // almost certainly a frontend bug, not something to block the owner over.
+  let assignedLocationIds = [];
+  if (Array.isArray(location_ids) && location_ids.length > 0) {
+    const validLocations = await Location.find({
+      _id: { $in: location_ids },
+      business_id: req.user.business_id,
+    }).select('_id').lean();
+    assignedLocationIds = validLocations.map((l) => l._id);
   }
 
   const bcrypt = require('bcryptjs');
@@ -417,24 +451,75 @@ const createStaff = async (req, res) => {
     name:                  name.trim(),
     email:                 email.toLowerCase().trim(),
     password_hash,
-    role:                  'staff',
+    role:                  'branch_manager',
     must_change_password:  true,
+    location_ids:          assignedLocationIds,
+    active_location_id:    assignedLocationIds.length > 0 ? assignedLocationIds[0] : null,
   });
 
-  res.status(201).json({ data: { _id: staff._id, name: staff.name, email: staff.email, created_at: staff.created_at } });
+  res.status(201).json({
+    data: {
+      _id: staff._id,
+      name: staff.name,
+      email: staff.email,
+      created_at: staff.created_at,
+      location_ids: staff.location_ids,
+      active_location_id: staff.active_location_id,
+    },
+  });
 };
 
-// DELETE /api/business/staff/:id - owner only, removes a staff account from their own business
+// DELETE /api/business/staff/:id - owner only, removes a branch_manager account from their own business
 const deleteStaff = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
-  const staff = await User.findOne({ _id: req.params.id, business_id: req.user.business_id, role: 'staff' });
+  const staff = await User.findOne({ _id: req.params.id, business_id: req.user.business_id, role: 'branch_manager' });
   if (!staff) {
     return res.status(404).json({ error: 'Staff account not found.' });
   }
   await User.findByIdAndDelete(staff._id);
   res.json({ data: { message: 'Staff account removed.' } });
+};
+
+// PATCH /api/business/staff/:id/locations - owner only (spec section 8:
+// "Assign staff to one or more locations when supported"). Replaces the
+// branch manager's full location_ids list with whatever is sent -- the
+// frontend sends the complete desired set (a multi-select), not a diff.
+const patchStaffLocations = async (req, res) => {
+  if (!req.user.business_id) {
+    return res.status(403).json({ error: 'No business associated with this account.' });
+  }
+  const { location_ids } = req.body;
+  if (!Array.isArray(location_ids)) {
+    return res.status(400).json({ error: 'location_ids must be an array.' });
+  }
+
+  const staff = await User.findOne({ _id: req.params.id, business_id: req.user.business_id, role: 'branch_manager' });
+  if (!staff) {
+    return res.status(404).json({ error: 'Staff account not found.' });
+  }
+
+  // Every id must genuinely belong to this business -- never trust the
+  // request body's ids directly onto another tenant's data.
+  const validLocations = location_ids.length > 0
+    ? await Location.find({ _id: { $in: location_ids }, business_id: req.user.business_id }).select('_id').lean()
+    : [];
+  const validIds = validLocations.map((l) => l._id);
+
+  staff.location_ids = validIds;
+  // If the manager's current active_location_id was just unassigned,
+  // fall back to the first remaining location (or null) so they're never
+  // left pointing at a location they can no longer access.
+  const stillHasActive = staff.active_location_id &&
+    validIds.some((id) => String(id) === String(staff.active_location_id));
+  if (!stillHasActive) {
+    staff.active_location_id = validIds.length > 0 ? validIds[0] : null;
+  }
+
+  await staff.save();
+
+  res.json({ data: { _id: staff._id, location_ids: staff.location_ids, active_location_id: staff.active_location_id } });
 };
 
 // GET /api/business/my-results -- owner or staff. The owner's own Google
@@ -487,4 +572,4 @@ const setGoogleNumbers = async (req, res) => {
   res.json({ data: entry });
 };
 
-module.exports = { getMyResults, setGoogleNumbers, listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff };
+module.exports = { getMyResults, setGoogleNumbers, listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff, patchStaffLocations };

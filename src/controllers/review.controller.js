@@ -1,8 +1,30 @@
-﻿'use strict';
+'use strict';
 
 /**
  * review.controller.js
  * Authenticated review management for the dashboard.
+ *
+ * Phase 5 (Owner Dashboard spec, "Reviews, Analytics and Campaigns",
+ * section 13): every listing/export/mutation endpoint below now goes
+ * through the shared utils/locationScope.js helper on top of the existing
+ * tenantFilter (business_id) scoping.
+ *
+ * This is a real fix, not just a new filter option: previously every one
+ * of these endpoints scoped ONLY by business_id, so a branch_manager
+ * (who can call all of these -- see review.routes.js roleGuards) saw and
+ * could resolve/edit EVERY review for the whole business, not just their
+ * own assigned branch. That's exactly what spec section 8 says not to
+ * allow ("Branch managers must not gain organization-wide access by
+ * default" / "Enforce permissions in backend services and APIs, not only
+ * by hiding menu items in the interface"). getLocationScopeFilter fixes
+ * this for every role automatically:
+ *   owner / super_admin -- unaffected, still see everything by default,
+ *     with an optional &location_id= to narrow to one branch (used by the
+ *     new owner/reviews.jsx).
+ *   branch_manager -- now ALWAYS scoped to their own assigned
+ *     location_ids (plus location_id: null documents, so legacy/
+ *     not-yet-location-aware data doesn't just disappear), with no way to
+ *     see another branch's reviews even by guessing an id.
  */
 
 const Review = require('../models/Review');
@@ -14,10 +36,19 @@ const { buildBrandedCsv, sendBrandedPdf, fetchImageBuffer } = require('../utils/
 const { canUseFeature, getEffectivePlanSlug, getPlanLimits } = require('../utils/planLimits');
 const { lockedResponse } = require('../utils/planGate');
 const { getUsageCount, recordUsage } = require('../utils/usageMeter');
+const { getLocationScopeFilter } = require('../utils/locationScope');
 
 const tenantFilter = (user) => {
   if (user.role === 'super_admin') return {};
   return { business_id: user.business_id };
+};
+
+// Combines tenant (business_id) scoping with location scoping in one call
+// -- every handler below that touches a list of reviews/feedback (or a
+// single review by id) uses this instead of tenantFilter alone. Throws
+// { statusCode, message } on a bad/unauthorized location_id.
+const scopedFilter = async (req) => {
+  return { ...tenantFilter(req.user), ...(await getLocationScopeFilter(req)) };
 };
 
 const SORT_OPTIONS = {
@@ -30,7 +61,14 @@ const SORT_OPTIONS = {
 // GET /api/reviews â€” public reviews (4-5 star)
 const listReviews = async (req, res) => {
   const { rating, channel, search, start_date, end_date, sort, page, limit } = req.validatedQuery;
-  const filter = { ...tenantFilter(req.user), is_public: true };
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
+  const filter = { ...base, is_public: true };
   if (rating)  filter.rating = rating;
   if (channel) filter.source = channel;
   if (start_date || end_date) {
@@ -71,7 +109,14 @@ const listReviews = async (req, res) => {
 // GET /api/reviews/private -- private feedback (1-3 star)
 const listPrivateFeedback = async (req, res) => {
   const { rating, channel, tag, stage, search, start_date, end_date, sort, is_resolved, page, limit } = req.validatedQuery;
-  const filter = { ...tenantFilter(req.user), is_public: false };
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
+  const filter = { ...base, is_public: false };
   if (is_resolved !== undefined) filter.resolved = is_resolved;
   if (rating)  filter.rating = rating;
   if (channel) filter.source = channel;
@@ -93,7 +138,7 @@ const listPrivateFeedback = async (req, res) => {
   const skip = (page - 1) * limit;
   const sortSpec = SORT_OPTIONS[sort] || SORT_OPTIONS.newest;
 
-  const totalUnresolved = await Review.countDocuments({ ...tenantFilter(req.user), is_public: false, resolved: false });
+  const totalUnresolved = await Review.countDocuments({ ...base, is_public: false, resolved: false });
 
   let feedback = await Review.find(filter)
     .populate('customer_id', 'name phone email')
@@ -119,7 +164,14 @@ const listPrivateFeedback = async (req, res) => {
 // feedback filter dropdown. Categories are business-type-aware and dynamic
 // (see feedbackTagger.js), so this replaces a hardcoded option list.
 const listFeedbackTags = async (req, res) => {
-  const tags = await Review.distinct('tags', { ...tenantFilter(req.user), is_public: false });
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
+  const tags = await Review.distinct('tags', { ...base, is_public: false });
   res.json({ data: tags.filter(Boolean).sort() });
 };
 
@@ -134,7 +186,14 @@ const getThemeSummary = async (req, res) => {
   const since = new Date();
   since.setDate(since.getDate() - days);
 
-  const base = { ...tenantFilter(req.user), created_at: { $gte: since } };
+  let scoped;
+  try {
+    scoped = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
+  const base = { ...scoped, created_at: { $gte: since } };
 
   const [positiveAgg, negativeAgg] = await Promise.all([
     Review.aggregate([
@@ -169,7 +228,14 @@ const getThemeSummary = async (req, res) => {
 // feedback for this business, and when they were last contacted. Null for
 // anonymous QR feedback with no customer on file.
 const getCustomerContext = async (req, res) => {
-  const review = await Review.findOne({ _id: req.params.id, ...tenantFilter(req.user) }).select('customer_id business_id');
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
+  const review = await Review.findOne({ _id: req.params.id, ...base }).select('customer_id business_id');
   if (!review) return res.status(404).json({ error: 'Review not found.' });
   if (!review.customer_id) return res.json({ data: null });
 
@@ -191,7 +257,14 @@ const getCustomerContext = async (req, res) => {
 
 // POST /api/reviews/:id/generate-reply â€” template-based draft reply
 const generateReplyForReview = async (req, res) => {
-  const review = await Review.findOne({ _id: req.params.id, ...tenantFilter(req.user) })
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
+  const review = await Review.findOne({ _id: req.params.id, ...base })
     .populate('customer_id', 'name')
     .select('-__v');
 
@@ -238,8 +311,15 @@ const resolveFeedback = async (req, res) => {
   const { resolved_by } = req.body || {};
   const cleanResolvedBy = resolved_by && resolved_by.trim() ? resolved_by.trim() : (req.user.name || null);
 
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
   const review = await Review.findOneAndUpdate(
-    { _id: req.params.id, ...tenantFilter(req.user), is_public: false },
+    { _id: req.params.id, ...base, is_public: false },
     { $set: { resolved: true, resolved_by: cleanResolvedBy, resolved_at: new Date() } },
     { new: true }
   ).select('-__v');
@@ -254,7 +334,14 @@ const resolveFeedback = async (req, res) => {
 // GET /api/reviews/export
 const exportReviews = async (req, res) => {
   const { rating, channel, search, start_date, end_date } = req.query;
-  const filter = { ...tenantFilter(req.user), is_public: true };
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
+  const filter = { ...base, is_public: true };
   if (rating)  filter.rating = parseInt(rating, 10);
   if (channel) filter.source = channel;
   if (start_date || end_date) {
@@ -331,8 +418,15 @@ const setFeedbackStage = async (req, res) => {
     return res.status(400).json({ error: '"stage" must be one of: ' + VALID_STAGES.join(', ') + '.' });
   }
 
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
   const review = await Review.findOneAndUpdate(
-    { _id: req.params.id, ...tenantFilter(req.user), is_public: false },
+    { _id: req.params.id, ...base, is_public: false },
     { $set: { stage } },
     { new: true }
   ).select('-__v');
@@ -357,8 +451,15 @@ const markFeedbackSent = async (req, res) => {
   const cleanReplyText = (reply_text || '').trim().slice(0, 2000) || null;
   const now = new Date();
 
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
   const review = await Review.findOneAndUpdate(
-    { _id: req.params.id, ...tenantFilter(req.user), is_public: false },
+    { _id: req.params.id, ...base, is_public: false },
     {
       $set: { stage: 'awaiting_confirmation', reply_sent_at: now, reply_channel: channel, reply_text: cleanReplyText },
       $push: { replies: { channel, text: cleanReplyText, sent_at: now } },
@@ -376,8 +477,15 @@ const setFeedbackNotes = async (req, res) => {
   const { notes } = req.body || {};
   const cleanNotes = (notes || '').trim().slice(0, 1000) || null;
 
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
   const review = await Review.findOneAndUpdate(
-    { _id: req.params.id, ...tenantFilter(req.user), is_public: false },
+    { _id: req.params.id, ...base, is_public: false },
     { $set: { internal_notes: cleanNotes } },
     { new: true }
   ).select('-__v');
@@ -393,7 +501,14 @@ const setFeedbackNotes = async (req, res) => {
 // date range), same two-brand CSV/PDF treatment as exportReviews above.
 const exportPrivateFeedback = async (req, res) => {
   const { rating, channel, search, start_date, end_date, tag, stage, is_resolved } = req.query;
-  const filter = { ...tenantFilter(req.user), is_public: false };
+  let base;
+  try {
+    base = await scopedFilter(req);
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    throw err;
+  }
+  const filter = { ...base, is_public: false };
   if (rating)  filter.rating = parseInt(rating, 10);
   if (channel) filter.source = channel;
   if (tag)     filter.tags = tag;
