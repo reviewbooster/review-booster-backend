@@ -394,12 +394,21 @@ router.post(
     }
 
     let onboardingCompleted = true;
+    let multiLocation = false;
     if (user.business_id) {
       const business = await Business.findById(user.business_id).select('is_suspended onboarding_completed').lean();
       if (business && business.is_suspended) {
         return res.status(403).json({ error: 'This account has been suspended. Contact support.' });
       }
       onboardingCompleted = business ? !!business.onboarding_completed : true;
+      // Owner Dashboard eligibility (spec section 2/3): "eligible owners"
+      // means owner + more than one Location on the business. Computed
+      // here rather than trusted from the client, same reasoning as every
+      // other server-side permission check in this build.
+      if (user.role === 'owner') {
+        const locationCount = await Location.countDocuments({ business_id: user.business_id });
+        multiLocation = locationCount > 1;
+      }
     }
 
     const accessToken    = signAccessToken(user);
@@ -422,6 +431,7 @@ router.post(
         onboarding_completed: onboardingCompleted,
         location_ids:         user.location_ids,
         active_location_id:   user.active_location_id,
+        multi_location:       multiLocation,
       },
     });
   })
@@ -449,6 +459,7 @@ router.post(
     }
 
     let onboardingCompleted = true;
+    let multiLocation = false;
     if (user.business_id) {
       const business = await Business.findById(user.business_id).select('is_suspended onboarding_completed').lean();
       if (business && business.is_suspended) {
@@ -456,6 +467,10 @@ router.post(
         return res.status(403).json({ error: 'Account suspended.' });
       }
       onboardingCompleted = business ? !!business.onboarding_completed : true;
+      if (user.role === 'owner') {
+        const locationCount = await Location.countDocuments({ business_id: user.business_id });
+        multiLocation = locationCount > 1;
+      }
     }
 
     const newAccessToken    = signAccessToken(user);
@@ -478,6 +493,7 @@ router.post(
         onboarding_completed: onboardingCompleted,
         location_ids:         user.location_ids,
         active_location_id:   user.active_location_id,
+        multi_location:       multiLocation,
       },
     });
   })
