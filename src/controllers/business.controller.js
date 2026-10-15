@@ -495,7 +495,7 @@ const patchStaffLocations = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
-  const { location_ids } = req.body;
+  const { location_ids, phone } = req.body;
   if (!Array.isArray(location_ids)) {
     return res.status(400).json({ error: 'location_ids must be an array.' });
   }
@@ -522,9 +522,13 @@ const patchStaffLocations = async (req, res) => {
     staff.active_location_id = validIds.length > 0 ? validIds[0] : null;
   }
 
+  if (phone !== undefined) {
+    staff.phone = phone && phone.trim() ? phone.trim() : null;
+  }
+
   await staff.save();
 
-  res.json({ data: { _id: staff._id, location_ids: staff.location_ids, active_location_id: staff.active_location_id } });
+  res.json({ data: { _id: staff._id, phone: staff.phone, location_ids: staff.location_ids, active_location_id: staff.active_location_id } });
 };
 
 // GET /api/business/my-results -- owner or staff. The owner's own Google
@@ -578,5 +582,6 @@ const setGoogleNumbers = async (req, res) => {
 };
 
 module.exports = { getMyResults, setGoogleNumbers, listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff, patchStaffLocations };
+
 
 
