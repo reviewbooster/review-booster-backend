@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 const express   = require('express');
 const multer    = require('multer');
 const router    = express.Router();
@@ -8,7 +8,7 @@ const asyncWrap = require('../utils/asyncWrap');
 const {
   listBusinesses, deleteBusiness, resetBusinessPassword,
   getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, getMyResults, setGoogleNumbers, uploadMyLogo, deleteMyLogo,
-  updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff, patchStaffLocations,
+  updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff, patchStaffLocations, resetStaffPassword,
 } = require('../controllers/business.controller');
 const { getMyStory, saveMyStory, withdrawMyStory } = require('../controllers/successStory.controller');
 const upload = multer({
@@ -42,6 +42,9 @@ router.delete('/staff/:id',   auth, roleGuard('owner'), asyncWrap(deleteStaff));
 // one or more locations -- owner only. Full-replace semantics; see
 // business.controller.js's patchStaffLocations for details.
 router.patch('/staff/:id/locations', auth, roleGuard('owner'), asyncWrap(patchStaffLocations));
+// Regenerates a branch manager's password (real one is never recoverable)
+// and returns the new plaintext once, for the Team page's WhatsApp resend.
+router.post('/staff/:id/reset-password', auth, roleGuard('owner'), asyncWrap(resetStaffPassword));
 
 // Super-admin routes
 router.get('/',                auth, requireSuperAdmin, asyncWrap(listBusinesses));

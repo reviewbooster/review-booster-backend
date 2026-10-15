@@ -23,6 +23,18 @@
  * and verify every location_id actually belongs to that business, so an
  * owner can never assign (or accidentally reveal) another business's
  * locations.
+ *
+ * createStaff now requires a phone, stored on the User doc (see
+ * models/User.js) so the owner's Team page can build a one-tap WhatsApp
+ * message to the new branch manager with their login link, email, and
+ * temporary password right after creation.
+ *
+ * resetStaffPassword: for an EXISTING branch manager, the real password
+ * is never recoverable (only a bcrypt hash is stored), so the Team page's
+ * per-row WhatsApp resend button calls this to generate a brand-new
+ * random password, store its hash, force a change on next login, and
+ * return the plaintext exactly once so it can be sent on WhatsApp. It is
+ * never logged or stored anywhere in plaintext.
  */
 const nodeCrypto    = require('crypto');
 const mongoose      = require('mongoose');
@@ -37,6 +49,19 @@ const { logAction } = require('./auditLog.controller');
 const { getPlanLimits, canUseFeature, getEffectivePlanSlug } = require('../utils/planLimits');
 const { lockedResponse } = require('../utils/planGate');
 const { buildResults } = require('../utils/resultsSnapshot');
+
+// Generates a random 10-character password for resetStaffPassword below.
+// Excludes visually-confusable characters (0/O, 1/l/I) since this gets
+// read off a phone screen and retyped on first login.
+function generateTempPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const bytes = nodeCrypto.randomBytes(10);
+  let out = '';
+  for (let i = 0; i < 10; i++) {
+    out += chars[bytes[i] % chars.length];
+  }
+  return out;
+}
 
 // GET /api/business
 const listBusinesses = async (req, res) => {
@@ -114,7 +139,7 @@ const getResetRequests = async (req, res) => {
   res.json({ data: users });
 };
 
-// GET /api/business/my-qr â€” any authenticated user with a business_id
+// GET /api/business/my-qr — any authenticated user with a business_id
 const getMyQrToken = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
@@ -134,7 +159,7 @@ const getMyQrToken = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name, business_type: business.type || null } });
 };
 
-// GET /api/business/:id/qr â€” super_admin fetches any business QR token (auto-creates if missing)
+// GET /api/business/:id/qr — super_admin fetches any business QR token (auto-creates if missing)
 const getBusinessQr = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -151,7 +176,7 @@ const getBusinessQr = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name } });
 };
 
-// PATCH /api/business/:id/google-url â€” super_admin only
+// PATCH /api/business/:id/google-url — super_admin only
 const updateGoogleUrl = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -491,6 +516,12 @@ const deleteStaff = async (req, res) => {
 // "Assign staff to one or more locations when supported"). Replaces the
 // branch manager's full location_ids list with whatever is sent -- the
 // frontend sends the complete desired set (a multi-select), not a diff.
+//
+// Also accepts an optional phone, so the owner can add/fix a branch
+// manager's number after creation (e.g. accounts created before the
+// WhatsApp invite feature existed) and then use the WhatsApp resend
+// button on the Team page. Omitted entirely -> phone is left untouched;
+// sent as an empty string -> cleared back to null.
 const patchStaffLocations = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
@@ -529,6 +560,31 @@ const patchStaffLocations = async (req, res) => {
   await staff.save();
 
   res.json({ data: { _id: staff._id, phone: staff.phone, location_ids: staff.location_ids, active_location_id: staff.active_location_id } });
+};
+
+// POST /api/business/staff/:id/reset-password - owner only. Generates a
+// brand-new password for a branch manager (their real one is never
+// recoverable -- only a hash is stored), saves its hash, forces a change
+// on next login, and invalidates their current session (refresh token
+// cleared) since the old password no longer works. Returns the plaintext
+// password exactly once, for the Team page's WhatsApp resend button.
+const resetStaffPassword = async (req, res) => {
+  if (!req.user.business_id) {
+    return res.status(403).json({ error: 'No business associated with this account.' });
+  }
+  const staff = await User.findOne({ _id: req.params.id, business_id: req.user.business_id, role: 'branch_manager' });
+  if (!staff) {
+    return res.status(404).json({ error: 'Staff account not found.' });
+  }
+
+  const newPassword = generateTempPassword();
+  const bcrypt = require('bcryptjs');
+  staff.password_hash = await bcrypt.hash(newPassword, 12);
+  staff.must_change_password = true;
+  staff.refresh_token_hash = null;
+  await staff.save();
+
+  res.json({ data: { _id: staff._id, password: newPassword } });
 };
 
 // GET /api/business/my-results -- owner or staff. The owner's own Google
@@ -581,7 +637,4 @@ const setGoogleNumbers = async (req, res) => {
   res.json({ data: entry });
 };
 
-module.exports = { getMyResults, setGoogleNumbers, listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff, patchStaffLocations };
-
-
-
+module.exports = { getMyResults, setGoogleNumbers, listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff, patchStaffLocations, resetStaffPassword };
