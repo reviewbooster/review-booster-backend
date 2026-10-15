@@ -417,6 +417,9 @@ const createStaff = async (req, res) => {
   if (!password || password.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters.' });
   }
+  if (!phone || !phone.trim()) {
+    return res.status(400).json({ error: 'Phone number is required.' });
+  }
 
   const myBusiness = await Business.findById(req.user.business_id).select('plan trial_ends_at plan_expires_at').lean();
   const limits = await getPlanLimits(getEffectivePlanSlug(myBusiness));
@@ -450,7 +453,7 @@ const createStaff = async (req, res) => {
     business_id:           req.user.business_id,
     name:                  name.trim(),
     email:                 email.toLowerCase().trim(),
-    phone:                 phone && phone.trim() ? phone.trim() : null,
+    phone:                 phone.trim(),
     password_hash,
     role:                  'branch_manager',
     must_change_password:  true,
@@ -575,4 +578,5 @@ const setGoogleNumbers = async (req, res) => {
 };
 
 module.exports = { getMyResults, setGoogleNumbers, listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff, patchStaffLocations };
+
 
