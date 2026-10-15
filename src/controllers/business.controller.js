@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /**
  * business.controller.js
  * Super-admin: list, delete businesses, reset passwords.
@@ -114,7 +114,7 @@ const getResetRequests = async (req, res) => {
   res.json({ data: users });
 };
 
-// GET /api/business/my-qr — any authenticated user with a business_id
+// GET /api/business/my-qr â€” any authenticated user with a business_id
 const getMyQrToken = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
@@ -134,7 +134,7 @@ const getMyQrToken = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name, business_type: business.type || null } });
 };
 
-// GET /api/business/:id/qr — super_admin fetches any business QR token (auto-creates if missing)
+// GET /api/business/:id/qr â€” super_admin fetches any business QR token (auto-creates if missing)
 const getBusinessQr = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -151,7 +151,7 @@ const getBusinessQr = async (req, res) => {
   res.json({ data: { qr_token: business.qr_token, business_name: business.name } });
 };
 
-// PATCH /api/business/:id/google-url — super_admin only
+// PATCH /api/business/:id/google-url â€” super_admin only
 const updateGoogleUrl = async (req, res) => {
   const { id } = req.params;
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -397,7 +397,7 @@ const listStaff = async (req, res) => {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
   const staff = await User.find({ business_id: req.user.business_id, role: 'branch_manager' })
-    .select('name email created_at location_ids active_location_id')
+    .select('name email phone created_at location_ids active_location_id')
     .sort({ created_at: -1 });
   res.json({ data: staff });
 };
@@ -407,7 +407,7 @@ const createStaff = async (req, res) => {
   if (!req.user.business_id) {
     return res.status(403).json({ error: 'No business associated with this account.' });
   }
-  const { name, email, password, location_ids } = req.body;
+  const { name, email, password, location_ids, phone } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Name is required.' });
   }
@@ -450,6 +450,7 @@ const createStaff = async (req, res) => {
     business_id:           req.user.business_id,
     name:                  name.trim(),
     email:                 email.toLowerCase().trim(),
+    phone:                 phone && phone.trim() ? phone.trim() : null,
     password_hash,
     role:                  'branch_manager',
     must_change_password:  true,
@@ -462,6 +463,7 @@ const createStaff = async (req, res) => {
       _id: staff._id,
       name: staff.name,
       email: staff.email,
+      phone: staff.phone,
       created_at: staff.created_at,
       location_ids: staff.location_ids,
       active_location_id: staff.active_location_id,
@@ -573,3 +575,4 @@ const setGoogleNumbers = async (req, res) => {
 };
 
 module.exports = { getMyResults, setGoogleNumbers, listBusinesses, deleteBusiness, resetBusinessPassword, getResetRequests, getMyQrToken, getMySettings, updateMySettings, markFeatureSeen, uploadMyLogo, deleteMyLogo, updateGoogleUrl, toggleSuspend, getBusinessQr, listStaff, createStaff, deleteStaff, patchStaffLocations };
+
